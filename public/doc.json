@@ -1,0 +1,2154 @@
+{
+    "openapi": "3.0.3",
+    "info": {
+        "title": "Api Documentation",
+        "description": "Laravel autogenerate swagger",
+        "termsOfService": "http:\/\/swagger.io\/terms\/",
+        "contact": {
+            "email": "hussein4alaa@gmail.com"
+        },
+        "license": {
+            "name": "Github",
+            "url": "https:\/\/github.com\/hussein4alaa"
+        },
+        "version": "3.0.7"
+    },
+    "servers": [
+        {
+            "url": "http:\/\/localhost:8000",
+            "description": "localhost"
+        }
+    ],
+    "components": {
+        "tags": [
+            {
+                "name": "Auth",
+                "description": null
+            },
+            {
+                "name": "User",
+                "description": null
+            },
+            {
+                "name": "Park",
+                "description": null
+            },
+            {
+                "name": "Customer",
+                "description": null
+            },
+            {
+                "name": "WhatsApp",
+                "description": null
+            }
+        ],
+        "paths": {
+            "\/api\/register": {
+                "post": {
+                    "tags": [
+                        "Auth"
+                    ],
+                    "summary": "register",
+                    "description": "",
+                    "operationId": "_api_register_POST",
+                    "parameters": [],
+                    "responses": {
+                        "422": {
+                            "description": "Unprocessable entity",
+                            "content": {
+                                "application\/json": {
+                                    "example": {
+                                        "message": "The given data was invalid.",
+                                        "errors": {
+                                            "name": [
+                                                "The name field is required."
+                                            ],
+                                            "email": [
+                                                "The email field is required."
+                                            ],
+                                            "password": [
+                                                "The password field is required."
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "requestBody": {
+                        "description": "",
+                        "content": {
+                            "multipart\/form-data": {
+                                "schema": {
+                                    "$ref": "#\/components\/schemas\/AuthRegister"
+                                }
+                            },
+                            "application\/json": {
+                                "schema": {
+                                    "$ref": "#\/components\/schemas\/AuthRegister"
+                                }
+                            }
+                        },
+                        "required": true
+                    }
+                }
+            },
+            "\/api\/login": {
+                "post": {
+                    "tags": [
+                        "Auth"
+                    ],
+                    "summary": "login",
+                    "description": "",
+                    "operationId": "_api_login_POST",
+                    "parameters": [],
+                    "responses": {
+                        "401": {
+                            "content": {
+                                "application\/json": {
+                                    "example": {
+                                        "error": "Invalid credentials"
+                                    }
+                                }
+                            },
+                            "description": "Unauthorized"
+                        },
+                        "422": {
+                            "description": "Unprocessable entity",
+                            "content": {
+                                "application\/json": {
+                                    "example": {
+                                        "message": "The given data was invalid.",
+                                        "errors": {
+                                            "email": [
+                                                "The email field is required."
+                                            ],
+                                            "password": [
+                                                "The password field is required."
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "requestBody": {
+                        "description": "",
+                        "content": {
+                            "multipart\/form-data": {
+                                "schema": {
+                                    "$ref": "#\/components\/schemas\/AuthLogin"
+                                }
+                            },
+                            "application\/json": {
+                                "schema": {
+                                    "$ref": "#\/components\/schemas\/AuthLogin"
+                                }
+                            }
+                        },
+                        "required": true
+                    }
+                }
+            },
+            "\/api\/user": {
+                "get": {
+                    "tags": [
+                        "Auth"
+                    ],
+                    "summary": "user",
+                    "description": "",
+                    "operationId": "_api_user_GET|HEAD",
+                    "parameters": [],
+                    "responses": [],
+                    "security": [
+                        {
+                            "authorization": []
+                        }
+                    ]
+                }
+            },
+            "\/api\/logout": {
+                "post": {
+                    "tags": [
+                        "Auth"
+                    ],
+                    "summary": "logout",
+                    "description": "",
+                    "operationId": "_api_logout_POST",
+                    "parameters": [],
+                    "responses": [],
+                    "security": [
+                        {
+                            "authorization": []
+                        }
+                    ]
+                }
+            },
+            "\/api\/users": {
+                "get": {
+                    "tags": [
+                        "User"
+                    ],
+                    "summary": "users",
+                    "description": "",
+                    "operationId": "_api_users_GET|HEAD",
+                    "parameters": [],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application\/json": {
+                                    "example": {
+                                        "data": [
+                                            {
+                                                "id": 1,
+                                                "name": "Example",
+                                                "email": "user@example.com",
+                                                "phone_number": 0,
+                                                "roles": [
+                                                    {
+                                                        "id": 1,
+                                                        "role": "string"
+                                                    }
+                                                ]
+                                            }
+                                        ],
+                                        "links": {
+                                            "first": "http:\/\/example.com\/api?page=1",
+                                            "last": "http:\/\/example.com\/api?page=1",
+                                            "prev": null,
+                                            "next": null
+                                        },
+                                        "meta": {
+                                            "current_page": 1,
+                                            "from": 1,
+                                            "last_page": 1,
+                                            "links": [],
+                                            "path": "http:\/\/example.com\/api",
+                                            "per_page": 15,
+                                            "to": 1,
+                                            "total": 1
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "security": [
+                        {
+                            "authorization": []
+                        }
+                    ]
+                },
+                "post": {
+                    "tags": [
+                        "User"
+                    ],
+                    "summary": "users",
+                    "description": "",
+                    "operationId": "_api_users_POST",
+                    "parameters": [],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application\/json": {
+                                    "example": {
+                                        "id": 1,
+                                        "name": "Example",
+                                        "email": "user@example.com",
+                                        "phone_number": 0
+                                    }
+                                }
+                            }
+                        },
+                        "422": {
+                            "description": "Unprocessable entity",
+                            "content": {
+                                "application\/json": {
+                                    "example": {
+                                        "message": "The given data was invalid.",
+                                        "errors": []
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "security": [
+                        {
+                            "authorization": []
+                        }
+                    ],
+                    "requestBody": {
+                        "description": "",
+                        "content": {
+                            "multipart\/form-data": {
+                                "schema": {
+                                    "$ref": "#\/components\/schemas\/UserStore"
+                                }
+                            },
+                            "application\/json": {
+                                "schema": {
+                                    "$ref": "#\/components\/schemas\/UserStore"
+                                }
+                            }
+                        },
+                        "required": true
+                    }
+                }
+            },
+            "\/api\/users\/{id}": {
+                "get": {
+                    "tags": [
+                        "User"
+                    ],
+                    "summary": "users",
+                    "description": "",
+                    "operationId": "_api_users__id__GET|HEAD",
+                    "parameters": [
+                        {
+                            "name": "id",
+                            "in": "path",
+                            "description": "id",
+                            "required": true,
+                            "schema": {
+                                "type": "string"
+                            }
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application\/json": {
+                                    "example": {
+                                        "id": 1,
+                                        "name": "Example",
+                                        "email": "user@example.com",
+                                        "phone_number": 0,
+                                        "roles": [
+                                            {
+                                                "id": 1,
+                                                "role": "string"
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "security": [
+                        {
+                            "authorization": []
+                        }
+                    ]
+                },
+                "put": {
+                    "tags": [
+                        "User"
+                    ],
+                    "summary": "users",
+                    "description": "",
+                    "operationId": "_api_users__id__PUT",
+                    "parameters": [
+                        {
+                            "name": "id",
+                            "in": "path",
+                            "description": "id",
+                            "required": true,
+                            "schema": {
+                                "type": "string"
+                            }
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application\/json": {
+                                    "example": {
+                                        "id": 1,
+                                        "name": "Example",
+                                        "email": "user@example.com",
+                                        "phone_number": 0
+                                    }
+                                }
+                            }
+                        },
+                        "422": {
+                            "description": "Unprocessable entity",
+                            "content": {
+                                "application\/json": {
+                                    "example": {
+                                        "message": "The given data was invalid.",
+                                        "errors": []
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "security": [
+                        {
+                            "authorization": []
+                        }
+                    ],
+                    "requestBody": {
+                        "description": "",
+                        "content": {
+                            "multipart\/form-data": {
+                                "schema": {
+                                    "$ref": "#\/components\/schemas\/UserUpdate"
+                                }
+                            },
+                            "application\/json": {
+                                "schema": {
+                                    "$ref": "#\/components\/schemas\/UserUpdate"
+                                }
+                            }
+                        },
+                        "required": true
+                    }
+                },
+                "delete": {
+                    "tags": [
+                        "User"
+                    ],
+                    "summary": "users",
+                    "description": "",
+                    "operationId": "_api_users__id__DELETE",
+                    "parameters": [
+                        {
+                            "name": "id",
+                            "in": "path",
+                            "description": "id",
+                            "required": true,
+                            "schema": {
+                                "type": "string"
+                            }
+                        }
+                    ],
+                    "responses": [],
+                    "security": [
+                        {
+                            "authorization": []
+                        }
+                    ]
+                }
+            },
+            "\/api\/parks": {
+                "post": {
+                    "tags": [
+                        "Park"
+                    ],
+                    "summary": "parks",
+                    "description": "",
+                    "operationId": "_api_parks_POST",
+                    "parameters": [],
+                    "responses": {
+                        "422": {
+                            "description": "Unprocessable entity",
+                            "content": {
+                                "application\/json": {
+                                    "example": {
+                                        "message": "The given data was invalid.",
+                                        "errors": {
+                                            "name": [
+                                                "The name field is required."
+                                            ],
+                                            "capacity": [
+                                                "The capacity field is required."
+                                            ],
+                                            "country": [
+                                                "The country field is required."
+                                            ],
+                                            "state": [
+                                                "The state field is required."
+                                            ],
+                                            "latitude": [
+                                                "The latitude field is required."
+                                            ],
+                                            "longitude": [
+                                                "The longitude field is required."
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "security": [
+                        {
+                            "authorization": []
+                        }
+                    ],
+                    "requestBody": {
+                        "description": "",
+                        "content": {
+                            "multipart\/form-data": {
+                                "schema": {
+                                    "$ref": "#\/components\/schemas\/ParkStore"
+                                }
+                            },
+                            "application\/json": {
+                                "schema": {
+                                    "$ref": "#\/components\/schemas\/ParkStore"
+                                }
+                            }
+                        },
+                        "required": true
+                    }
+                },
+                "get": {
+                    "tags": [
+                        "Park"
+                    ],
+                    "summary": "parks",
+                    "description": "",
+                    "operationId": "_api_parks_GET|HEAD",
+                    "parameters": [],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application\/json": {
+                                    "example": {
+                                        "data": [
+                                            {
+                                                "id": 1,
+                                                "name": "Example",
+                                                "owner_id": 1,
+                                                "capacity": "string",
+                                                "free_spaces": "string",
+                                                "created_at": "2024-01-01T12:00:00.000000Z",
+                                                "updated_at": "2024-01-01T12:00:00.000000Z"
+                                            }
+                                        ],
+                                        "links": {
+                                            "first": "http:\/\/example.com\/api?page=1",
+                                            "last": "http:\/\/example.com\/api?page=1",
+                                            "prev": null,
+                                            "next": null
+                                        },
+                                        "meta": {
+                                            "current_page": 1,
+                                            "from": 1,
+                                            "last_page": 1,
+                                            "links": [],
+                                            "path": "http:\/\/example.com\/api",
+                                            "per_page": 15,
+                                            "to": 1,
+                                            "total": 1
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "security": [
+                        {
+                            "authorization": []
+                        }
+                    ]
+                }
+            },
+            "\/api\/parks\/{id}": {
+                "get": {
+                    "tags": [
+                        "Park"
+                    ],
+                    "summary": "parks",
+                    "description": "",
+                    "operationId": "_api_parks__id__GET|HEAD",
+                    "parameters": [
+                        {
+                            "name": "id",
+                            "in": "path",
+                            "description": "id",
+                            "required": true,
+                            "schema": {
+                                "type": "string"
+                            }
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application\/json": {
+                                    "example": {
+                                        "id": 1,
+                                        "name": "Example",
+                                        "owner_id": 1,
+                                        "capacity": "string",
+                                        "free_spaces": "string",
+                                        "created_at": "2024-01-01T12:00:00.000000Z",
+                                        "updated_at": "2024-01-01T12:00:00.000000Z"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "security": [
+                        {
+                            "authorization": []
+                        }
+                    ]
+                },
+                "put": {
+                    "tags": [
+                        "Park"
+                    ],
+                    "summary": "parks",
+                    "description": "",
+                    "operationId": "_api_parks__id__PUT",
+                    "parameters": [
+                        {
+                            "name": "id",
+                            "in": "path",
+                            "description": "id",
+                            "required": true,
+                            "schema": {
+                                "type": "string"
+                            }
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application\/json": {
+                                    "example": {
+                                        "id": 1,
+                                        "name": "Example",
+                                        "owner_id": 1,
+                                        "capacity": "string",
+                                        "free_spaces": "string",
+                                        "created_at": "2024-01-01T12:00:00.000000Z",
+                                        "updated_at": "2024-01-01T12:00:00.000000Z"
+                                    }
+                                }
+                            }
+                        },
+                        "422": {
+                            "description": "Unprocessable entity",
+                            "content": {
+                                "application\/json": {
+                                    "example": {
+                                        "message": "The given data was invalid.",
+                                        "errors": {
+                                            "name": [
+                                                "The name field is required."
+                                            ],
+                                            "capacity": [
+                                                "The capacity field is required."
+                                            ],
+                                            "free_spaces": [
+                                                "The free_spaces field is required."
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "security": [
+                        {
+                            "authorization": []
+                        }
+                    ],
+                    "requestBody": {
+                        "description": "",
+                        "content": {
+                            "multipart\/form-data": {
+                                "schema": {
+                                    "$ref": "#\/components\/schemas\/ParkUpdate"
+                                }
+                            },
+                            "application\/json": {
+                                "schema": {
+                                    "$ref": "#\/components\/schemas\/ParkUpdate"
+                                }
+                            }
+                        },
+                        "required": true
+                    }
+                },
+                "delete": {
+                    "tags": [
+                        "Park"
+                    ],
+                    "summary": "parks",
+                    "description": "",
+                    "operationId": "_api_parks__id__DELETE",
+                    "parameters": [
+                        {
+                            "name": "id",
+                            "in": "path",
+                            "description": "id",
+                            "required": true,
+                            "schema": {
+                                "type": "string"
+                            }
+                        }
+                    ],
+                    "responses": [],
+                    "security": [
+                        {
+                            "authorization": []
+                        }
+                    ]
+                }
+            },
+            "\/api\/user\/parks": {
+                "get": {
+                    "tags": [
+                        "Park"
+                    ],
+                    "summary": "user",
+                    "description": "",
+                    "operationId": "_api_user_parks_GET|HEAD",
+                    "parameters": [],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application\/json": {
+                                    "example": [
+                                        {
+                                            "id": 1,
+                                            "name": "Example",
+                                            "owner_id": 1,
+                                            "capacity": "string",
+                                            "free_spaces": "string",
+                                            "created_at": "2024-01-01T12:00:00.000000Z",
+                                            "updated_at": "2024-01-01T12:00:00.000000Z"
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "security": [
+                        {
+                            "authorization": []
+                        }
+                    ]
+                }
+            },
+            "\/api\/parks\/{id}\/entercar": {
+                "post": {
+                    "tags": [
+                        "Park"
+                    ],
+                    "summary": "parks",
+                    "description": "",
+                    "operationId": "_api_parks__id__entercar_POST",
+                    "parameters": [
+                        {
+                            "name": "id",
+                            "in": "path",
+                            "description": "id",
+                            "required": true,
+                            "schema": {
+                                "type": "string"
+                            }
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application\/json": {
+                                    "example": {
+                                        "message": "تم دخول السيارة إلى الموقف بنجاح."
+                                    }
+                                }
+                            }
+                        },
+                        "400": {
+                            "content": {
+                                "application\/json": {
+                                    "example": {
+                                        "message": "الموقف ممتلئ. لا توجد أماكن فارغة."
+                                    }
+                                }
+                            },
+                            "description": "Error"
+                        }
+                    },
+                    "security": [
+                        {
+                            "authorization": []
+                        }
+                    ]
+                }
+            },
+            "\/api\/parks\/{id}\/exitcar": {
+                "post": {
+                    "tags": [
+                        "Park"
+                    ],
+                    "summary": "parks",
+                    "description": "",
+                    "operationId": "_api_parks__id__exitcar_POST",
+                    "parameters": [
+                        {
+                            "name": "id",
+                            "in": "path",
+                            "description": "id",
+                            "required": true,
+                            "schema": {
+                                "type": "string"
+                            }
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application\/json": {
+                                    "example": {
+                                        "message": "تم خروج السيارة من الموقف بنجاح."
+                                    }
+                                }
+                            }
+                        },
+                        "400": {
+                            "content": {
+                                "application\/json": {
+                                    "example": {
+                                        "message": "الموقف فارغ. لا توجد سيارات داخله."
+                                    }
+                                }
+                            },
+                            "description": "Error"
+                        }
+                    },
+                    "security": [
+                        {
+                            "authorization": []
+                        }
+                    ]
+                }
+            },
+            "\/api\/customer\/parks\/nearby": {
+                "get": {
+                    "tags": [
+                        "Customer"
+                    ],
+                    "summary": "customer",
+                    "description": "",
+                    "operationId": "_api_customer_parks_nearby_GET|HEAD",
+                    "parameters": [
+                        {
+                            "name": "latitude",
+                            "in": "query",
+                            "description": "latitude",
+                            "required": true,
+                            "schema": {
+                                "required": "true",
+                                "type": "number"
+                            }
+                        },
+                        {
+                            "name": "longitude",
+                            "in": "query",
+                            "description": "longitude",
+                            "required": true,
+                            "schema": {
+                                "required": "true",
+                                "type": "number"
+                            }
+                        },
+                        {
+                            "name": "radius",
+                            "in": "query",
+                            "description": "radius",
+                            "required": false,
+                            "schema": {
+                                "nullable": "true",
+                                "type": "number",
+                                "minimum": "50",
+                                "maximum": "50000"
+                            }
+                        },
+                        {
+                            "name": "limit",
+                            "in": "query",
+                            "description": "limit",
+                            "required": false,
+                            "schema": {
+                                "nullable": "true",
+                                "type": "number",
+                                "minimum": "1",
+                                "maximum": "50"
+                            }
+                        }
+                    ],
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application\/json": {
+                                    "example": [
+                                        {
+                                            "id": 1,
+                                            "name": "Example",
+                                            "capacity": "string",
+                                            "free_spaces": "string"
+                                        }
+                                    ]
+                                }
+                            }
+                        },
+                        "422": {
+                            "description": "Unprocessable entity",
+                            "content": {
+                                "application\/json": {
+                                    "example": {
+                                        "message": "The given data was invalid.",
+                                        "errors": {
+                                            "latitude": [
+                                                "The latitude field is required."
+                                            ],
+                                            "longitude": [
+                                                "The longitude field is required."
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "security": [
+                        {
+                            "authorization": []
+                        }
+                    ]
+                }
+            },
+            "\/api\/webhook": {
+                "get": {
+                    "tags": [
+                        "WhatsApp"
+                    ],
+                    "summary": "webhook",
+                    "description": "",
+                    "operationId": "_api_webhook_GET|HEAD",
+                    "parameters": [],
+                    "responses": []
+                },
+                "post": {
+                    "tags": [
+                        "WhatsApp"
+                    ],
+                    "summary": "webhook",
+                    "description": "",
+                    "operationId": "_api_webhook_POST",
+                    "parameters": [],
+                    "responses": []
+                }
+            }
+        },
+        "schemas": {
+            "AuthRegister": {
+                "required": [
+                    "name",
+                    "email",
+                    "password"
+                ],
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "required": "true",
+                        "type": "string",
+                        "maximum": "255"
+                    },
+                    "email": {
+                        "required": "true",
+                        "type": "string",
+                        "format": "email",
+                        "maximum": "255",
+                        "unique": "true"
+                    },
+                    "password": {
+                        "required": "true",
+                        "type": "string",
+                        "minimum": "8"
+                    },
+                    "phone_number": {
+                        "nullable": "true",
+                        "type": "string",
+                        "maximum": "32"
+                    }
+                },
+                "xml": {
+                    "name": "authregister"
+                }
+            },
+            "AuthLogin": {
+                "required": [
+                    "email",
+                    "password"
+                ],
+                "type": "object",
+                "properties": {
+                    "email": {
+                        "required": "true",
+                        "type": "string",
+                        "format": "email",
+                        "maximum": "255"
+                    },
+                    "password": {
+                        "required": "true",
+                        "type": "string",
+                        "minimum": "8"
+                    }
+                },
+                "xml": {
+                    "name": "authlogin"
+                }
+            },
+            "UserStore": {
+                "required": [],
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "maximum": "255"
+                    },
+                    "email": {
+                        "type": "string",
+                        "format": "email",
+                        "maximum": "255"
+                    },
+                    "password": {
+                        "type": "string",
+                        "minimum": "8"
+                    },
+                    "phone_number": {
+                        "nullable": "true",
+                        "type": "string",
+                        "maximum": "32"
+                    },
+                    "location_id": {
+                        "nullable": "true",
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "roles[]": {
+                        "type": "array"
+                    },
+                    "roles[merge_input]": {
+                        "type": "number",
+                        "enum": [
+                            "1",
+                            "2",
+                            "3",
+                            "4",
+                            "5"
+                        ]
+                    }
+                },
+                "xml": {
+                    "name": "userstore"
+                }
+            },
+            "UserUpdate": {
+                "required": [],
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "maximum": "255"
+                    },
+                    "email": {
+                        "type": "string",
+                        "format": "email",
+                        "maximum": "255"
+                    },
+                    "password": {
+                        "type": "string",
+                        "minimum": "8"
+                    },
+                    "phone_number": {
+                        "nullable": "true",
+                        "type": "string",
+                        "maximum": "32"
+                    },
+                    "location_id": {
+                        "nullable": "true",
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "roles[]": {
+                        "type": "array"
+                    },
+                    "roles[merge_input]": {
+                        "type": "number",
+                        "enum": [
+                            "1",
+                            "2",
+                            "3",
+                            "4",
+                            "5"
+                        ]
+                    }
+                },
+                "xml": {
+                    "name": "userupdate"
+                }
+            },
+            "ParkStore": {
+                "required": [
+                    "name",
+                    "capacity",
+                    "country",
+                    "state",
+                    "latitude",
+                    "longitude"
+                ],
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "required": "true",
+                        "type": "string",
+                        "maximum": "255"
+                    },
+                    "capacity": {
+                        "required": "true",
+                        "type": "number",
+                        "minimum": "1"
+                    },
+                    "free_spaces": {
+                        "nullable": "true",
+                        "type": "number",
+                        "minimum": "0"
+                    },
+                    "country": {
+                        "required": "true",
+                        "enum": [
+                            "1",
+                            "2"
+                        ],
+                        "type": "string"
+                    },
+                    "state": {
+                        "required": "true",
+                        "enum": [
+                            "1",
+                            "2",
+                            "3",
+                            "4",
+                            "5",
+                            "6",
+                            "7",
+                            "8",
+                            "9",
+                            "10",
+                            "11",
+                            "12",
+                            "13",
+                            "14",
+                            "15",
+                            "16",
+                            "17"
+                        ],
+                        "type": "string"
+                    },
+                    "city": {
+                        "nullable": "true",
+                        "type": "string",
+                        "maximum": "255"
+                    },
+                    "postal_code": {
+                        "nullable": "true",
+                        "type": "string",
+                        "maximum": "20"
+                    },
+                    "latitude": {
+                        "required": "true",
+                        "type": "number"
+                    },
+                    "longitude": {
+                        "required": "true",
+                        "type": "number"
+                    },
+                    "extra_details": {
+                        "nullable": "true",
+                        "type": "string",
+                        "maximum": "1000"
+                    }
+                },
+                "xml": {
+                    "name": "parkstore"
+                }
+            },
+            "ParkUpdate": {
+                "required": [
+                    "name",
+                    "capacity",
+                    "free_spaces"
+                ],
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "required": "true",
+                        "type": "string",
+                        "maximum": "255"
+                    },
+                    "capacity": {
+                        "required": "true",
+                        "type": "number",
+                        "minimum": "1"
+                    },
+                    "free_spaces": {
+                        "required": "true",
+                        "type": "number",
+                        "minimum": "0"
+                    }
+                },
+                "xml": {
+                    "name": "parkupdate"
+                }
+            }
+        },
+        "securitySchemes": {
+            "authorization": {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "JWT"
+            }
+        }
+    },
+    "tags": [
+        {
+            "name": "Auth",
+            "description": null
+        },
+        {
+            "name": "User",
+            "description": null
+        },
+        {
+            "name": "Park",
+            "description": null
+        },
+        {
+            "name": "Customer",
+            "description": null
+        },
+        {
+            "name": "WhatsApp",
+            "description": null
+        }
+    ],
+    "paths": {
+        "\/api\/register": {
+            "post": {
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "register",
+                "description": "",
+                "operationId": "_api_register_POST",
+                "parameters": [],
+                "responses": {
+                    "422": {
+                        "description": "Unprocessable entity",
+                        "content": {
+                            "application\/json": {
+                                "example": {
+                                    "message": "The given data was invalid.",
+                                    "errors": {
+                                        "name": [
+                                            "The name field is required."
+                                        ],
+                                        "email": [
+                                            "The email field is required."
+                                        ],
+                                        "password": [
+                                            "The password field is required."
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "requestBody": {
+                    "description": "",
+                    "content": {
+                        "multipart\/form-data": {
+                            "schema": {
+                                "$ref": "#\/components\/schemas\/AuthRegister"
+                            }
+                        },
+                        "application\/json": {
+                            "schema": {
+                                "$ref": "#\/components\/schemas\/AuthRegister"
+                            }
+                        }
+                    },
+                    "required": true
+                }
+            }
+        },
+        "\/api\/login": {
+            "post": {
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "login",
+                "description": "",
+                "operationId": "_api_login_POST",
+                "parameters": [],
+                "responses": {
+                    "401": {
+                        "content": {
+                            "application\/json": {
+                                "example": {
+                                    "error": "Invalid credentials"
+                                }
+                            }
+                        },
+                        "description": "Unauthorized"
+                    },
+                    "422": {
+                        "description": "Unprocessable entity",
+                        "content": {
+                            "application\/json": {
+                                "example": {
+                                    "message": "The given data was invalid.",
+                                    "errors": {
+                                        "email": [
+                                            "The email field is required."
+                                        ],
+                                        "password": [
+                                            "The password field is required."
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "requestBody": {
+                    "description": "",
+                    "content": {
+                        "multipart\/form-data": {
+                            "schema": {
+                                "$ref": "#\/components\/schemas\/AuthLogin"
+                            }
+                        },
+                        "application\/json": {
+                            "schema": {
+                                "$ref": "#\/components\/schemas\/AuthLogin"
+                            }
+                        }
+                    },
+                    "required": true
+                }
+            }
+        },
+        "\/api\/user": {
+            "get": {
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "user",
+                "description": "",
+                "operationId": "_api_user_GET|HEAD",
+                "parameters": [],
+                "responses": [],
+                "security": [
+                    {
+                        "authorization": []
+                    }
+                ]
+            }
+        },
+        "\/api\/logout": {
+            "post": {
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "logout",
+                "description": "",
+                "operationId": "_api_logout_POST",
+                "parameters": [],
+                "responses": [],
+                "security": [
+                    {
+                        "authorization": []
+                    }
+                ]
+            }
+        },
+        "\/api\/users": {
+            "get": {
+                "tags": [
+                    "User"
+                ],
+                "summary": "users",
+                "description": "",
+                "operationId": "_api_users_GET|HEAD",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application\/json": {
+                                "example": {
+                                    "data": [
+                                        {
+                                            "id": 1,
+                                            "name": "Example",
+                                            "email": "user@example.com",
+                                            "phone_number": 0,
+                                            "roles": [
+                                                {
+                                                    "id": 1,
+                                                    "role": "string"
+                                                }
+                                            ]
+                                        }
+                                    ],
+                                    "links": {
+                                        "first": "http:\/\/example.com\/api?page=1",
+                                        "last": "http:\/\/example.com\/api?page=1",
+                                        "prev": null,
+                                        "next": null
+                                    },
+                                    "meta": {
+                                        "current_page": 1,
+                                        "from": 1,
+                                        "last_page": 1,
+                                        "links": [],
+                                        "path": "http:\/\/example.com\/api",
+                                        "per_page": 15,
+                                        "to": 1,
+                                        "total": 1
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "authorization": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "User"
+                ],
+                "summary": "users",
+                "description": "",
+                "operationId": "_api_users_POST",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application\/json": {
+                                "example": {
+                                    "id": 1,
+                                    "name": "Example",
+                                    "email": "user@example.com",
+                                    "phone_number": 0
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable entity",
+                        "content": {
+                            "application\/json": {
+                                "example": {
+                                    "message": "The given data was invalid.",
+                                    "errors": []
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "authorization": []
+                    }
+                ],
+                "requestBody": {
+                    "description": "",
+                    "content": {
+                        "multipart\/form-data": {
+                            "schema": {
+                                "$ref": "#\/components\/schemas\/UserStore"
+                            }
+                        },
+                        "application\/json": {
+                            "schema": {
+                                "$ref": "#\/components\/schemas\/UserStore"
+                            }
+                        }
+                    },
+                    "required": true
+                }
+            }
+        },
+        "\/api\/users\/{id}": {
+            "get": {
+                "tags": [
+                    "User"
+                ],
+                "summary": "users",
+                "description": "",
+                "operationId": "_api_users__id__GET|HEAD",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application\/json": {
+                                "example": {
+                                    "id": 1,
+                                    "name": "Example",
+                                    "email": "user@example.com",
+                                    "phone_number": 0,
+                                    "roles": [
+                                        {
+                                            "id": 1,
+                                            "role": "string"
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "authorization": []
+                    }
+                ]
+            },
+            "put": {
+                "tags": [
+                    "User"
+                ],
+                "summary": "users",
+                "description": "",
+                "operationId": "_api_users__id__PUT",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application\/json": {
+                                "example": {
+                                    "id": 1,
+                                    "name": "Example",
+                                    "email": "user@example.com",
+                                    "phone_number": 0
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable entity",
+                        "content": {
+                            "application\/json": {
+                                "example": {
+                                    "message": "The given data was invalid.",
+                                    "errors": []
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "authorization": []
+                    }
+                ],
+                "requestBody": {
+                    "description": "",
+                    "content": {
+                        "multipart\/form-data": {
+                            "schema": {
+                                "$ref": "#\/components\/schemas\/UserUpdate"
+                            }
+                        },
+                        "application\/json": {
+                            "schema": {
+                                "$ref": "#\/components\/schemas\/UserUpdate"
+                            }
+                        }
+                    },
+                    "required": true
+                }
+            },
+            "delete": {
+                "tags": [
+                    "User"
+                ],
+                "summary": "users",
+                "description": "",
+                "operationId": "_api_users__id__DELETE",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": [],
+                "security": [
+                    {
+                        "authorization": []
+                    }
+                ]
+            }
+        },
+        "\/api\/parks": {
+            "post": {
+                "tags": [
+                    "Park"
+                ],
+                "summary": "parks",
+                "description": "",
+                "operationId": "_api_parks_POST",
+                "parameters": [],
+                "responses": {
+                    "422": {
+                        "description": "Unprocessable entity",
+                        "content": {
+                            "application\/json": {
+                                "example": {
+                                    "message": "The given data was invalid.",
+                                    "errors": {
+                                        "name": [
+                                            "The name field is required."
+                                        ],
+                                        "capacity": [
+                                            "The capacity field is required."
+                                        ],
+                                        "country": [
+                                            "The country field is required."
+                                        ],
+                                        "state": [
+                                            "The state field is required."
+                                        ],
+                                        "latitude": [
+                                            "The latitude field is required."
+                                        ],
+                                        "longitude": [
+                                            "The longitude field is required."
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "authorization": []
+                    }
+                ],
+                "requestBody": {
+                    "description": "",
+                    "content": {
+                        "multipart\/form-data": {
+                            "schema": {
+                                "$ref": "#\/components\/schemas\/ParkStore"
+                            }
+                        },
+                        "application\/json": {
+                            "schema": {
+                                "$ref": "#\/components\/schemas\/ParkStore"
+                            }
+                        }
+                    },
+                    "required": true
+                }
+            },
+            "get": {
+                "tags": [
+                    "Park"
+                ],
+                "summary": "parks",
+                "description": "",
+                "operationId": "_api_parks_GET|HEAD",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application\/json": {
+                                "example": {
+                                    "data": [
+                                        {
+                                            "id": 1,
+                                            "name": "Example",
+                                            "owner_id": 1,
+                                            "capacity": "string",
+                                            "free_spaces": "string",
+                                            "created_at": "2024-01-01T12:00:00.000000Z",
+                                            "updated_at": "2024-01-01T12:00:00.000000Z"
+                                        }
+                                    ],
+                                    "links": {
+                                        "first": "http:\/\/example.com\/api?page=1",
+                                        "last": "http:\/\/example.com\/api?page=1",
+                                        "prev": null,
+                                        "next": null
+                                    },
+                                    "meta": {
+                                        "current_page": 1,
+                                        "from": 1,
+                                        "last_page": 1,
+                                        "links": [],
+                                        "path": "http:\/\/example.com\/api",
+                                        "per_page": 15,
+                                        "to": 1,
+                                        "total": 1
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "authorization": []
+                    }
+                ]
+            }
+        },
+        "\/api\/parks\/{id}": {
+            "get": {
+                "tags": [
+                    "Park"
+                ],
+                "summary": "parks",
+                "description": "",
+                "operationId": "_api_parks__id__GET|HEAD",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application\/json": {
+                                "example": {
+                                    "id": 1,
+                                    "name": "Example",
+                                    "owner_id": 1,
+                                    "capacity": "string",
+                                    "free_spaces": "string",
+                                    "created_at": "2024-01-01T12:00:00.000000Z",
+                                    "updated_at": "2024-01-01T12:00:00.000000Z"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "authorization": []
+                    }
+                ]
+            },
+            "put": {
+                "tags": [
+                    "Park"
+                ],
+                "summary": "parks",
+                "description": "",
+                "operationId": "_api_parks__id__PUT",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application\/json": {
+                                "example": {
+                                    "id": 1,
+                                    "name": "Example",
+                                    "owner_id": 1,
+                                    "capacity": "string",
+                                    "free_spaces": "string",
+                                    "created_at": "2024-01-01T12:00:00.000000Z",
+                                    "updated_at": "2024-01-01T12:00:00.000000Z"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable entity",
+                        "content": {
+                            "application\/json": {
+                                "example": {
+                                    "message": "The given data was invalid.",
+                                    "errors": {
+                                        "name": [
+                                            "The name field is required."
+                                        ],
+                                        "capacity": [
+                                            "The capacity field is required."
+                                        ],
+                                        "free_spaces": [
+                                            "The free_spaces field is required."
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "authorization": []
+                    }
+                ],
+                "requestBody": {
+                    "description": "",
+                    "content": {
+                        "multipart\/form-data": {
+                            "schema": {
+                                "$ref": "#\/components\/schemas\/ParkUpdate"
+                            }
+                        },
+                        "application\/json": {
+                            "schema": {
+                                "$ref": "#\/components\/schemas\/ParkUpdate"
+                            }
+                        }
+                    },
+                    "required": true
+                }
+            },
+            "delete": {
+                "tags": [
+                    "Park"
+                ],
+                "summary": "parks",
+                "description": "",
+                "operationId": "_api_parks__id__DELETE",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": [],
+                "security": [
+                    {
+                        "authorization": []
+                    }
+                ]
+            }
+        },
+        "\/api\/user\/parks": {
+            "get": {
+                "tags": [
+                    "Park"
+                ],
+                "summary": "user",
+                "description": "",
+                "operationId": "_api_user_parks_GET|HEAD",
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application\/json": {
+                                "example": [
+                                    {
+                                        "id": 1,
+                                        "name": "Example",
+                                        "owner_id": 1,
+                                        "capacity": "string",
+                                        "free_spaces": "string",
+                                        "created_at": "2024-01-01T12:00:00.000000Z",
+                                        "updated_at": "2024-01-01T12:00:00.000000Z"
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "authorization": []
+                    }
+                ]
+            }
+        },
+        "\/api\/parks\/{id}\/entercar": {
+            "post": {
+                "tags": [
+                    "Park"
+                ],
+                "summary": "parks",
+                "description": "",
+                "operationId": "_api_parks__id__entercar_POST",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application\/json": {
+                                "example": {
+                                    "message": "تم دخول السيارة إلى الموقف بنجاح."
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "content": {
+                            "application\/json": {
+                                "example": {
+                                    "message": "الموقف ممتلئ. لا توجد أماكن فارغة."
+                                }
+                            }
+                        },
+                        "description": "Error"
+                    }
+                },
+                "security": [
+                    {
+                        "authorization": []
+                    }
+                ]
+            }
+        },
+        "\/api\/parks\/{id}\/exitcar": {
+            "post": {
+                "tags": [
+                    "Park"
+                ],
+                "summary": "parks",
+                "description": "",
+                "operationId": "_api_parks__id__exitcar_POST",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application\/json": {
+                                "example": {
+                                    "message": "تم خروج السيارة من الموقف بنجاح."
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "content": {
+                            "application\/json": {
+                                "example": {
+                                    "message": "الموقف فارغ. لا توجد سيارات داخله."
+                                }
+                            }
+                        },
+                        "description": "Error"
+                    }
+                },
+                "security": [
+                    {
+                        "authorization": []
+                    }
+                ]
+            }
+        },
+        "\/api\/customer\/parks\/nearby": {
+            "get": {
+                "tags": [
+                    "Customer"
+                ],
+                "summary": "customer",
+                "description": "",
+                "operationId": "_api_customer_parks_nearby_GET|HEAD",
+                "parameters": [
+                    {
+                        "name": "latitude",
+                        "in": "query",
+                        "description": "latitude",
+                        "required": true,
+                        "schema": {
+                            "required": "true",
+                            "type": "number"
+                        }
+                    },
+                    {
+                        "name": "longitude",
+                        "in": "query",
+                        "description": "longitude",
+                        "required": true,
+                        "schema": {
+                            "required": "true",
+                            "type": "number"
+                        }
+                    },
+                    {
+                        "name": "radius",
+                        "in": "query",
+                        "description": "radius",
+                        "required": false,
+                        "schema": {
+                            "nullable": "true",
+                            "type": "number",
+                            "minimum": "50",
+                            "maximum": "50000"
+                        }
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "description": "limit",
+                        "required": false,
+                        "schema": {
+                            "nullable": "true",
+                            "type": "number",
+                            "minimum": "1",
+                            "maximum": "50"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application\/json": {
+                                "example": [
+                                    {
+                                        "id": 1,
+                                        "name": "Example",
+                                        "capacity": "string",
+                                        "free_spaces": "string"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable entity",
+                        "content": {
+                            "application\/json": {
+                                "example": {
+                                    "message": "The given data was invalid.",
+                                    "errors": {
+                                        "latitude": [
+                                            "The latitude field is required."
+                                        ],
+                                        "longitude": [
+                                            "The longitude field is required."
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "authorization": []
+                    }
+                ]
+            }
+        },
+        "\/api\/webhook": {
+            "get": {
+                "tags": [
+                    "WhatsApp"
+                ],
+                "summary": "webhook",
+                "description": "",
+                "operationId": "_api_webhook_GET|HEAD",
+                "parameters": [],
+                "responses": []
+            },
+            "post": {
+                "tags": [
+                    "WhatsApp"
+                ],
+                "summary": "webhook",
+                "description": "",
+                "operationId": "_api_webhook_POST",
+                "parameters": [],
+                "responses": []
+            }
+        }
+    }
+}
