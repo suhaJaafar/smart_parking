@@ -15,7 +15,6 @@ use Throwable;
 
 /**
  * Customer flow: find nearest parks with free spaces and reserve one.
- *
  * Steps:
  *   ask_location → user shares WhatsApp location (or types "lat,lng")
  *   choose_park  → user replies with the number of the park to reserve
