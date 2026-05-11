@@ -15,6 +15,7 @@ return new class extends Migration
             $table->uuid('id')->primary();
             $table->string('name');
             $table->uuid('location_id')->unique();
+            $table->foreignUuid('user_id')->nullable()->constrained('users')->nullOnDelete();
             $table->integer('capacity')->default(0);
             $table->integer('free_spaces')->default(0);
             $table->timestamps();

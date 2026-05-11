@@ -97,16 +97,20 @@ class OnboardingFlow
 
     /**
      * Existing user re-runs onboarding to switch / add a role.
-     * No account creation — just toggle the role and render the menu.
+    /**
+     * Existing user re-runs onboarding to switch their role.
+     * Roles are exclusive: switching to one detaches the other so the menu
+     * never mixes owner/customer options.
      */
     private function grantRoleToExistingUser(WhatsAppSession $session, bool $asOwner): string
     {
-        if ($asOwner) {
-            $role = Role::firstOrCreate(['role' => RoleTypes::SPACE_OWNER->value]);
-        } else {
-            $role = Role::firstOrCreate(['role' => RoleTypes::CUSTOMER->value]);
-        }
-        $session->user->roles()->syncWithoutDetaching([$role->id]);
+        $ownerRole    = Role::firstOrCreate(['role' => RoleTypes::SPACE_OWNER->value]);
+        $customerRole = Role::firstOrCreate(['role' => RoleTypes::CUSTOMER->value]);
+
+        // sync() replaces the user's role set entirely, guaranteeing exclusivity.
+        $session->user->roles()->sync([
+            $asOwner ? $ownerRole->id : $customerRole->id,
+        ]);
 
         $hasParks = $asOwner && $session->user->ownedParks()->exists();
         $session->reset();
@@ -146,27 +150,16 @@ class OnboardingFlow
 
     /**
      * Create the account using the WhatsApp phone as the sole identifier.
-     * Grants CUSTOMER always; grants SPACE_OWNER additionally if the user
-     * picked option 2 at the role-picker step.
+     * Grants exactly one role — SPACE_OWNER if the user picked option 2 at
+     * the role-picker step, CUSTOMER otherwise. Roles are mutually exclusive
+     * so the menu only shows the options relevant to the current role.
      */
     private function createAccount(WhatsAppSession $session): string
     {
         $asOwner = ($session->data['role_choice'] ?? null) === '2';
+        $role    = $asOwner ? RoleTypes::SPACE_OWNER : RoleTypes::CUSTOMER;
 
-        $user = User::create([
-            'name'         => $this->generateDefaultName($session->phone),
-            'email'        => "{$session->phone}@whatsapp.parkiq.local",
-            'password'     => bcrypt(str()->random(32)),
-            'phone_number' => $session->phone,
-        ]);
-
-        $customerRole = Role::firstOrCreate(['role' => RoleTypes::CUSTOMER->value]);
-        $user->roles()->sync([$customerRole->id]);
-
-        if ($asOwner) {
-            $ownerRole = Role::firstOrCreate(['role' => RoleTypes::SPACE_OWNER->value]);
-            $user->roles()->syncWithoutDetaching([$ownerRole->id]);
-        }
+        $user = $this->createUserWithRole($session->phone, $role);
 
         $session->update([
             'user_id'    => $user->id,
@@ -176,13 +169,43 @@ class OnboardingFlow
             'expires_at' => null,
         ]);
 
-        $user->load('roles');
-
         $header = $asOwner
             ? "✅ تم إنشاء حسابك! تم تفعيل وضع مالك الموقف.\n\n"
             : "✅ تم إنشاء حسابك بنجاح!\n\n";
 
         return $header . $this->menu->for($user);
+    }
+
+    /**
+     * Silently provision a CUSTOMER account from a WhatsApp phone — no
+     * prompts, no role question, no menu emission. Used by shortcut paths
+     * (e.g. unknown phone shares their location and we want to jump straight
+     * to nearest-park results without any onboarding back-and-forth).
+     *
+     * Returns the freshly-created User with roles loaded.
+     */
+    public function createCustomerSilently(string $phone): User
+    {
+        return $this->createUserWithRole($phone, RoleTypes::CUSTOMER);
+    }
+
+    /**
+     * Shared user-provisioning primitive. Single source of truth so the
+     * confirm-flow and the silent shortcut produce identical user rows.
+     */
+    private function createUserWithRole(string $phone, RoleTypes $role): User
+    {
+        $user = User::create([
+            'name'         => $this->generateDefaultName($phone),
+            'email'        => "{$phone}@whatsapp.parkiq.local",
+            'password'     => bcrypt(str()->random(32)),
+            'phone_number' => $phone,
+        ]);
+
+        $roleRow = Role::firstOrCreate(['role' => $role->value]);
+        $user->roles()->sync([$roleRow->id]);
+
+        return $user->load('roles');
     }
 
     /**

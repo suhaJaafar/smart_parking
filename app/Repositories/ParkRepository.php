@@ -39,7 +39,7 @@ class ParkRepository implements ParkRepositoryInterface
     public function paginateByOwner(User $owner, int $perPage = 10): LengthAwarePaginator
     {
         return Park::with('location')
-            ->where('owner_id', $owner->id)
+            ->where('user_id', $owner->id)
             ->latest()
             ->paginate($perPage);
     }

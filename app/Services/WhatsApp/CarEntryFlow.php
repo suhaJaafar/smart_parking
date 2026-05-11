@@ -132,9 +132,9 @@ class CarEntryFlow
 
             // If the customer pre-reserved this slot via the bot, the space
             // was already debited from free_spaces at reservation time.
-            // Fulfilling the hold (status → completed) means we must NOT
-            // decrement free_spaces a second time.
-            $heldReservation = $this->reservations->findActive($carOwner, $park);
+            // Accepting the hold (START → ACTIVE) means we must NOT decrement
+            // free_spaces a second time.
+            $heldReservation = $this->reservations->findPendingHold($carOwner, $park);
 
             $car = $this->carService->enterPark(
                 $car,
@@ -143,7 +143,7 @@ class CarEntryFlow
             );
 
             if ($heldReservation !== null) {
-                $this->reservations->markCompleted($carOwner, $park);
+                $this->reservations->markActive($carOwner, $park);
             }
         } catch (Throwable $e) {
             Log::error('WA car enter failed', ['error' => $e->getMessage()]);

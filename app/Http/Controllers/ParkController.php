@@ -69,7 +69,7 @@ class ParkController extends Controller
     {
         $park = $this->parks->findById($id);
         abort_if($park === null, HttpResponse::HTTP_NOT_FOUND);
-        abort_if($park->owner_id !== $request->user()->id, HttpResponse::HTTP_FORBIDDEN);
+        abort_if($park->user_id !== $request->user()->id, HttpResponse::HTTP_FORBIDDEN);
 
         $park = $this->parks->update($park, $request->validated());
 
@@ -80,7 +80,7 @@ class ParkController extends Controller
     {
         $park = $this->parks->findById($id);
         abort_if($park === null, HttpResponse::HTTP_NOT_FOUND);
-        abort_if($park->owner_id !== $request->user()->id, HttpResponse::HTTP_FORBIDDEN);
+        abort_if($park->user_id !== $request->user()->id, HttpResponse::HTTP_FORBIDDEN);
 
         $this->parks->delete($park);
 

@@ -39,7 +39,7 @@ class ParkService
 
             $park = $this->parks->create([
                 ...$parkData,
-                'owner_id'    => $owner->id,
+                'user_id'     => $owner->id,
                 'location_id' => $location->id,
             ]);
 

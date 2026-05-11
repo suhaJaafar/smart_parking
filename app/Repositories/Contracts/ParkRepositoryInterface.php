@@ -12,7 +12,7 @@ interface ParkRepositoryInterface
 
     /**
      * Persist a park. Caller must supply at minimum:
-     *   - owner_id    (uuid, users.id)
+     *   - user_id     (uuid, users.id) — the SPACE_OWNER user that owns the park
      *   - location_id (uuid, locations.id)
      *   - name        (string)
      *   - capacity    (int)

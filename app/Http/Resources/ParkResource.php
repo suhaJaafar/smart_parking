@@ -17,7 +17,7 @@ class ParkResource extends JsonResource
         return [
             'id'          => $this->id,
             'name'        => $this->name,
-            'owner_id'    => $this->owner_id,
+            'user_id'     => $this->user_id,
             'capacity'    => $this->capacity,
             'free_spaces' => $this->free_spaces,
             'location'    => new LocationResource($this->whenLoaded('location')),

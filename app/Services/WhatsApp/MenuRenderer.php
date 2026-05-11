@@ -63,7 +63,7 @@ class MenuRenderer
         }
 
         if ($isCustomer) {
-            $lines[] = "*اذا كنت زبون (سائق):*";
+            $lines[] = "*اذا كنت سائق:*";
             $lines[] = "4️⃣  أقرب موقف لي";
             $lines[] = '';
         }
@@ -83,8 +83,11 @@ class MenuRenderer
      */
     public function activeReservationBanner(User $user): ?string
     {
+        // "Open" reservations from the customer's POV are pending holds
+        // (START) and accepted-but-not-yet-exited stays (ACTIVE). Both
+        // should surface in the menu banner.
         $reserve = Reserve::where('user_id', $user->id)
-            ->where('status', Reserve::STATUS_ACTIVE)
+            ->whereIn('status', [Reserve::STATUS_START, Reserve::STATUS_ACTIVE])
             ->with('park')
             ->latest('created_at')
             ->first();

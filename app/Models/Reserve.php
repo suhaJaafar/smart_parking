@@ -10,10 +10,11 @@ class Reserve extends Model
 {
     use HasUuids;
 
-    public const STATUS_ACTIVE    = 'active';
-    public const STATUS_CANCELLED = 'cancelled';
-    public const STATUS_COMPLETED = 'completed';
-    public const STATUS_EXPIRED   = 'expired';
+    public const STATUS_START     = 1;
+    public const STATUS_ACTIVE    = 2;
+    public const STATUS_COMPLETED = 4;
+    public const STATUS_EXPIRED   = 5;
+    public const STATUS_CANCELLED = 7;
 
     protected $fillable = [
         'user_id',

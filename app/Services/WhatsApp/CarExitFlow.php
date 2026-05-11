@@ -4,8 +4,10 @@ namespace App\Services\WhatsApp;
 
 use App\Enums\RoleTypes;
 use App\Models\Car;
+use App\Models\Park;
 use App\Models\WhatsAppSession;
 use App\Services\CarService;
+use App\Services\ReservationService;
 use App\Services\WhatsApp\Prompt;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -22,6 +24,7 @@ class CarExitFlow
 
     public function __construct(
         private readonly CarService $carService,
+        private readonly ReservationService $reservations,
     ) {}
 
     public function handle(WhatsAppSession $session, string $message): ?string
@@ -97,7 +100,21 @@ class CarExitFlow
         }
 
         try {
+            // Capture the car's owner BEFORE detaching it from the park so
+            // we can close out their ACTIVE reservation → COMPLETED.
+            $carOwner = $car->user;
+
             $car = $this->carService->exitPark($car);
+
+            // Best-effort: if this customer had an ACTIVE reservation at this
+            // park, mark it completed now that the car has physically left.
+            // markCompleted() is idempotent — no-op when there's nothing to close.
+            if ($carOwner) {
+                $park = Park::find($parkId);
+                if ($park) {
+                    $this->reservations->markCompleted($carOwner, $park);
+                }
+            }
         } catch (Throwable $e) {
             Log::error('WA car exit failed', ['error' => $e->getMessage()]);
             $session->reset();
@@ -105,7 +122,7 @@ class CarExitFlow
         }
 
         $session->reset();
-        $park = \App\Models\Park::find($parkId);
+        $park = Park::find($parkId);
 
         return "✅ تم إخراج السيارة!\n"
              . "اللوحة: {$m[1]}-{$m[2]}\n"

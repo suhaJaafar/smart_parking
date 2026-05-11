@@ -101,6 +101,14 @@ class User extends Authenticatable implements JWTSubject
      */
     public function ownedParks(): HasMany
     {
-        return $this->hasMany(Park::class, 'owner_id');
+        return $this->hasMany(Park::class);
+    }
+
+    /**
+    * Reserves made by this user (only relevant for CUSTOMER role).
+    */
+    public function reserves(): HasMany
+    {
+        return $this->hasMany(Reserve::class);
     }
 }

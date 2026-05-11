@@ -11,8 +11,8 @@ use Illuminate\Validation\Rule;
  * Validates the payload for creating a park together with its location.
  *
  * The client sends lat/lng + park fields in a single flat JSON body. The
- * `owner_id` is intentionally NOT accepted here — it is taken from the
- * authenticated user inside the controller to prevent forgery.
+ * `user_id` (park owner) is intentionally NOT accepted here — it is taken
+ * from the authenticated user inside the controller to prevent forgery.
  */
 class StoreParkRequest extends FormRequest
 {

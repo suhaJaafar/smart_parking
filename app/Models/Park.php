@@ -12,7 +12,7 @@ class Park extends Model
     use HasUuids;
 
     protected $fillable = [
-        'owner_id',
+        'user_id',
         'location_id',
         'name',
         'capacity',
@@ -46,10 +46,19 @@ class Park extends Model
 
     /**
      * The space owner (a user with the SPACE_OWNER role) who owns this park.
+     * FK column on `parks` is `user_id`.
      */
     public function owner(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'owner_id');
+        return $this->belongsTo(User::class, 'user_id');
+    }
+
+    /**
+     * Reserves made for this park.
+     */
+    public function reserves(): HasMany
+    {
+        return $this->hasMany(Reserve::class);
     }
 }
 

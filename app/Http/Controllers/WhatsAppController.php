@@ -76,7 +76,7 @@ class WhatsAppController extends Controller
 
                         if ($from && $text !== '') {
                             Log::info("Message from {$from} ({$type}): {$text}");
-                            $this->handleMessage($from, $text);
+                            $this->handleMessage($from, $text, $type);
                         }
                     }
                 }
@@ -109,11 +109,26 @@ class WhatsAppController extends Controller
     // ===============================
     // BOT LOGIC
     // ===============================
-    private function handleMessage(string $from, string $text): void
+    private function handleMessage(string $from, string $text, string $type = 'text'): void
     {
         $session = $this->resolveSession($from);
         $msg     = trim($text);
         $lower   = mb_strtolower($msg);
+
+        // ===============================================================
+        // LOCATION SHORTCUT
+        // A bare WhatsApp location share with no active flow is treated as
+        // "find me the nearest park" — no questions asked. For an unknown
+        // phone we silently provision a CUSTOMER account first so the
+        // reservation step downstream has a real user to attach to.
+        // We deliberately skip this when the user is already mid-flow so
+        // existing onboarding / park-creation / car-entry flows that may
+        // legitimately receive a location keep working unchanged.
+        // ===============================================================
+        if ($type === 'location' && $msg !== '' && $session->flow === null) {
+            $this->handleLocationShortcut($session, $from, $msg);
+            return;
+        }
 
         // ===============================================================
         // GLOBAL ESCAPE COMMANDS
@@ -352,6 +367,40 @@ class WhatsAppController extends Controller
     }
 
     /**
+     * Frictionless entry point: a bare WhatsApp location share — from a
+     * brand-new phone or an existing customer at idle — jumps straight to
+     * the nearest-park results. For unknown phones a CUSTOMER account is
+     * silently provisioned first so the reserve step downstream has a real
+     * user to attach to.
+     *
+     * The session is moved directly into `nearby_parks/ask_location` so the
+     * incoming coordinates are consumed by `NearbyParksFlow::showResults()`
+     * — bypassing its `start()` prompt that would otherwise ask the user to
+     * share their location again.
+     */
+    private function handleLocationShortcut(WhatsAppSession $session, string $from, string $latLng): void
+    {
+        if (!$session->user) {
+            $user = $this->onboardingFlow->createCustomerSilently($session->phone);
+            $session->user_id = $user->id;
+            $session->setRelation('user', $user);
+        }
+
+        $session->update([
+            'flow'       => NearbyParksFlow::FLOW,
+            'step'       => 'ask_location',
+            'data'       => [],
+            'expires_at' => now()->addMinutes(10),
+        ]);
+
+        $reply = $this->nearbyParksFlow->handle($session->fresh(['user', 'user.roles']), $latLng);
+
+        if ($reply !== null) {
+            $this->sendReply($from, $reply);
+        }
+    }
+
+    /**
      * Render the role-aware main menu, with an active-reservation banner
      * at the top when one exists, and a smarter footer pointing to `help`.
      */
@@ -545,18 +594,28 @@ class WhatsAppController extends Controller
     }
 
     /**
-     * Release the user's most recent ACTIVE reservation, refunding the slot.
-     * Returns a localized message describing the outcome.
+     * Release the user's most recent pending hold (status = START), refunding the slot.
+     * Cancellation is only permitted before the owner has entered the car;
+     * once the reservation is ACTIVE the customer must wait for the owner
+     * to exit the car instead.
      */
     private function cancelActiveReservation(WhatsAppSession $session): string
     {
         $reserve = Reserve::where('user_id', $session->user->id)
-            ->where('status', Reserve::STATUS_ACTIVE)
+            ->where('status', Reserve::STATUS_START)
             ->latest('created_at')
             ->first();
 
         if (!$reserve) {
-            return "ℹ️ لا يوجد حجز فعّال لإلغائه.\nأرسل 'القائمة' لرؤية القائمة.";
+            // Tell the user *why* we can't cancel — if they already have an
+            // ACTIVE reservation, cancellation is no longer possible.
+            $hasActive = Reserve::where('user_id', $session->user->id)
+                ->where('status', Reserve::STATUS_ACTIVE)
+                ->exists();
+
+            return $hasActive
+                ? "🚗 سيارتك حالياً داخل الموقف — لا يمكن إلغاء الحجز بعد دخول السيارة."
+                : "ℹ️ لا يوجد حجز فعّال لإلغائه.\nأرسل 'القائمة' لرؤية القائمة.";
         }
 
         $reserve = $this->reservations->cancel($reserve);
