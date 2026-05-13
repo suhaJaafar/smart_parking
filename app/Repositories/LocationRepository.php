@@ -4,10 +4,8 @@ namespace App\Repositories;
 
 use App\Models\Location;
 use App\Models\Park;
-use App\Models\User;
 use App\Repositories\Contracts\LocationRepositoryInterface;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\DB;
 
 class LocationRepository implements LocationRepositoryInterface
 {
@@ -16,46 +14,24 @@ class LocationRepository implements LocationRepositoryInterface
         return Location::find($id);
     }
 
-    public function create(array $data): Location
+        public function create(array $data): Location
     {
         $location = new Location();
-        $this->fill($location, $data);
+        $this->convertCoordinatesData($location, $data);
         $location->save();
-        return $location->refresh();
+        return $location;
     }
 
     public function update(Location $location, array $data): Location
     {
-        $this->fill($location, $data);
+        $this->convertCoordinatesData($location, $data);
         $location->save();
-
-        return $location->refresh();
+        return $location;
     }
 
     public function delete(Location $location): bool
     {
         return (bool) $location->delete();
-    }
-
-    public function trackUserLocation(User $user, float $latitude, float $longitude, array $extra = []): Location
-    {
-        return DB::transaction(function () use ($user, $latitude, $longitude, $extra) {
-            $payload = array_merge($extra, [
-                'latitude'  => $latitude,
-                'longitude' => $longitude,
-            ]);
-
-            if ($user->location_id !== null && ($existing = Location::find($user->location_id)) !== null) {
-                return $this->update($existing, $payload);
-            }
-
-            $location = $this->create($payload);
-
-            $user->location_id = $location->id;
-            $user->save();
-
-            return $location;
-        });
     }
 
     public function nearestParks(float $latitude, float $longitude, int $radiusMeters = 500): Collection
@@ -85,7 +61,7 @@ class LocationRepository implements LocationRepositoryInterface
      * Map the public array shape (with latitude/longitude) onto the model,
      * translating lat/lng into the PostGIS `coordinates` geography value.
      */
-    private function fill(Location $location, array $data): void
+    private function convertCoordinatesData(Location $location, array $data): void
     {
         foreach (['country', 'city', 'postal_code', 'state', 'extra_details'] as $key) {
             if (array_key_exists($key, $data)) {

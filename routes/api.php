@@ -13,25 +13,27 @@ Route::middleware('auth:api')->group(function () {
     Route::post('logout', [AuthController::class, 'logout']);
 
       // users routes — privileged user management, SUPER_ADMIN only.
-    Route::middleware('role:SUPER_ADMIN')->group(function () {
-        Route::get('users', [App\Http\Controllers\UserController::class, 'index']);
-        Route::post('users', [App\Http\Controllers\UserController::class, 'store']);
-        Route::get('users/{id}', [App\Http\Controllers\UserController::class, 'show']);
-        Route::put('users/{id}', [App\Http\Controllers\UserController::class, 'update']);
-        Route::delete('users/{id}', [App\Http\Controllers\UserController::class, 'destroy']);
+    Route::prefix('users')->group(function () {
+        Route::middleware('role:SUPER_ADMIN')->group(function () {
+            Route::get('/', [App\Http\Controllers\UserController::class, 'index']);
+            Route::post('/', [App\Http\Controllers\UserController::class, 'store']);
+            Route::get('{id}', [App\Http\Controllers\UserController::class, 'show']);
+            Route::put('{id}', [App\Http\Controllers\UserController::class, 'update']);
+            Route::delete('{id}', [App\Http\Controllers\UserController::class, 'destroy']);
+        });
     });
 
     // parking routes
-    Route::post('parks', [App\Http\Controllers\ParkController::class, 'store']);
-    Route::get('parks', [App\Http\Controllers\ParkController::class, 'index']);
-    Route::get('parks/{id}', [App\Http\Controllers\ParkController::class, 'show']);
-    Route::put('parks/{id}', [App\Http\Controllers\ParkController::class, 'update']);
-    Route::delete('parks/{id}', [App\Http\Controllers\ParkController::class, 'destroy']);
-    Route::get('user/parks', [App\Http\Controllers\ParkController::class, 'userParks']);
-    Route::post('parks/{id}/entercar', [App\Http\Controllers\ParkController::class, 'enterCar']);
-    Route::post('parks/{id}/exitcar', [App\Http\Controllers\ParkController::class, 'exitCar']);
-
-
+    Route::prefix('parks')->group(function () {
+    Route::post('/', [App\Http\Controllers\ParkController::class, 'store']);
+    Route::get('/', [App\Http\Controllers\ParkController::class, 'index']);
+    Route::get('{id}', [App\Http\Controllers\ParkController::class, 'show']);
+    Route::put('{id}', [App\Http\Controllers\ParkController::class, 'update']);
+    Route::delete('{id}', [App\Http\Controllers\ParkController::class, 'destroy']);
+    Route::get('user', [App\Http\Controllers\ParkController::class, 'userParks']);
+    Route::post('{id}/entercar', [App\Http\Controllers\ParkController::class, 'enterCar']);
+    Route::post('{id}/exitcar', [App\Http\Controllers\ParkController::class, 'exitCar']);
+    });
 
 
     // Admin-only routes

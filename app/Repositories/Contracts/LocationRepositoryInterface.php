@@ -44,16 +44,6 @@ interface LocationRepositoryInterface
      * Delete a location.
      */
     public function delete(Location $location): bool;
-
-    /**
-     * Track / refresh the user's current location.
-     *
-     * If the user already has a location row, its coordinates (and any
-     * supplied fields) are updated in place. Otherwise a new row is created
-     * and attached via users.location_id.
-     */
-    public function trackUserLocation(User $user, float $latitude, float $longitude, array $extra = []): Location;
-
     /**
      * Find the nearest parks to a given point, within $radiusMeters.
      *

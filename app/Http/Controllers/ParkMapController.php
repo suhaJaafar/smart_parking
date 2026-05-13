@@ -6,6 +6,7 @@ use Illuminate\Contracts\View\View;
 use Illuminate\Http\Request;
 
 /**
+ * Written BY AI
  * Renders the nearby-parks map for a customer who tapped the link sent on WhatsApp.
  *
  * The bot encodes the result list into a single short token in the URL so this

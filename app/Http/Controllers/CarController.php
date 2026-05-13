@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\Http\Requests\CarRequest;
 use App\Http\Resources\CarResource;
 use App\Models\Car;
-use App\Services\CarService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -15,10 +14,6 @@ use Symfony\Component\HttpFoundation\Response as HttpResponse;
 
 class CarController extends Controller
 {
-    public function __construct(
-        private readonly CarService $carService,
-    ) {}
-
     /**
      * List cars belonging to a given park.
      */
@@ -34,7 +29,7 @@ class CarController extends Controller
      */
     public function store(CarRequest $request): JsonResponse
     {
-        $car = $this->carService->store($request->validated(), $request->user());
+        $car = $request->user()->cars()->create($request->validated());
 
         return (new CarResource($car))
             ->response()
@@ -53,20 +48,31 @@ class CarController extends Controller
     public function update(CarRequest $request, string $id): JsonResource
     {
         $car = Car::findOrFail($id);
-        abort_if($car->owner_id !== $request->user()->id, HttpResponse::HTTP_FORBIDDEN);
-
-        $car = $this->carService->patch($car, $request->validated());
+        $this->authorizeOwnership($request, $car);
+        $car->update($request->validated());
 
         return new CarResource($car);
     }
 
+    /**
+     * Delete a car the authenticated user owns.
+     */
+
     public function destroy(Request $request, string $id): Response
     {
         $car = Car::findOrFail($id);
-        abort_if($car->owner_id !== $request->user()->id, HttpResponse::HTTP_FORBIDDEN);
-
-        $this->carService->delete($car);
+        $this->authorizeOwnership($request, $car);
+        $car->delete();
 
         return response()->noContent();
+    }
+
+    /**
+     * Ensure the authenticated user is the owner of the car.
+     */
+
+    private function authorizeOwnership(Request $request, Car $car): void
+    {
+        abort_unless($car->user_id === $request->user()->id, 403);
     }
 }
