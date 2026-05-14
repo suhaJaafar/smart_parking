@@ -43,6 +43,8 @@ class LocationRepository implements LocationRepositoryInterface
             $latitude
         );
 
+        // Using eloquent query builder
+        // to find parks within the radius, ordered by distance.
         return Park::query()
             ->join('locations', 'locations.id', '=', 'parks.location_id')
             ->whereRaw("ST_DWithin(locations.coordinates, {$point}, ?)", [$radiusMeters])

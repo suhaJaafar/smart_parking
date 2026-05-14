@@ -52,7 +52,7 @@ class ParkController extends Controller
             owner:        $request->user(),
         );
 
-        return (new ParkResource($park->load('location')))
+        return (new ParkResource($park->with('location')))
             ->response()
             ->setStatusCode(HttpResponse::HTTP_CREATED);
     }

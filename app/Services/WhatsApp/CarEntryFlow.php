@@ -139,7 +139,7 @@ class CarEntryFlow
             $car = $this->carService->enterPark(
                 $car,
                 $park->fresh(),
-                alreadyHeld: $heldReservation !== null,
+                alreadyFull: $heldReservation !== null,
             );
 
             if ($heldReservation !== null) {

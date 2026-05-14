@@ -62,14 +62,14 @@ class CarService
      * Park a car: link it to a park and decrement free_spaces, atomically.
      *
      * If the customer already had an ACTIVE reservation for this park, the
-     * slot was debited at reservation time. Pass $alreadyHeld = true to skip
+     * slot was debited at reservation time. Pass $alreadyFull = true to skip
      * the second decrement (the reservation is fulfilled, not duplicated).
      *
      * Throws if the park is full or if the car is already inside another park.
      */
-    public function enterPark(Car $car, Park $park, bool $alreadyHeld = false): Car
+    public function enterPark(Car $car, Park $park, bool $alreadyFull = false): Car
     {
-        return DB::transaction(function () use ($car, $park, $alreadyHeld) {
+        return DB::transaction(function () use ($car, $park, $alreadyFull) {
             // Lock the park row to safely check & decrement capacity.
             $park = Park::whereKey($park->id)->lockForUpdate()->firstOrFail();
 
@@ -81,7 +81,7 @@ class CarService
                 return $car; // already inside, idempotent.
             }
 
-            if (!$alreadyHeld) {
+            if (!$alreadyFull) {
                 if ($park->free_spaces <= 0) {
                     throw new RuntimeException('Park is full.');
                 }
@@ -101,7 +101,7 @@ class CarService
     {
         return DB::transaction(function () use ($car) {
             if ($car->park_id === null) {
-                return $car; // nothing to do, idempotent.
+                return $car; // nothing to do.
             }
 
             $park = Park::whereKey($car->park_id)->lockForUpdate()->firstOrFail();

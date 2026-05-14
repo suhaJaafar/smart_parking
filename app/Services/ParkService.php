@@ -21,8 +21,8 @@ use Illuminate\Support\Facades\DB;
 class ParkService
 {
     public function __construct(
-        private readonly ParkRepositoryInterface $parks,
-        private readonly LocationRepositoryInterface $locations,
+        private readonly ParkRepositoryInterface $parksInterface,
+        private readonly LocationRepositoryInterface $locationsInterface,
     ) {}
 
     /**
@@ -35,15 +35,15 @@ class ParkService
     public function createWithLocation(array $locationData, array $parkData, User $owner): Park
     {
         return DB::transaction(function () use ($locationData, $parkData, $owner) {
-            $location = $this->locations->create($locationData);
+            $location = $this->locationsInterface->create($locationData);
 
-            $park = $this->parks->create([
+            $park = $this->parksInterface->create([
                 ...$parkData,
                 'user_id'     => $owner->id,
                 'location_id' => $location->id,
             ]);
 
-            // Auto-grant SPACE_OWNER role on first park, idempotent on subsequent ones.
+            // add space owner role to the user that created this park.
             $role = Role::firstOrCreate(['role' => RoleTypes::SPACE_OWNER->value]);
             $owner->roles()->syncWithoutDetaching([$role->id]);
 
