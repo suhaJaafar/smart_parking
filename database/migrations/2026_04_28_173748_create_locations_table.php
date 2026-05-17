@@ -27,26 +27,10 @@ return new class extends Migration
             // GiST spatial index — makes ST_DWithin / ST_Distance / KNN sub-millisecond.
             $table->spatialIndex('coordinates', 'locations_coordinates_gix');
         });
-
-        // Now that `locations` exists, attach the deferred FK from users.location_id.
-        if (Schema::hasTable('users') && Schema::hasColumn('users', 'location_id')) {
-            Schema::table('users', function (Blueprint $table) {
-                $table->foreign('location_id')
-                    ->references('id')
-                    ->on('locations')
-                    ->nullOnDelete();
-            });
-        }
     }
 
     public function down(): void
     {
-        if (Schema::hasTable('users')) {
-            Schema::table('users', function (Blueprint $table) {
-                $table->dropForeign(['location_id']);
-            });
-        }
-
         Schema::dropIfExists('locations');
     }
 };

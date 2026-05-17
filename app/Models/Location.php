@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Location extends Model
 {
@@ -35,14 +35,20 @@ class Location extends Model
         ];
     }
 
-    public function user(): BelongsTo
+    /**
+     * Each location has one user.
+     */
+    public function user(): HasOne
     {
-        return $this->belongsTo(User::class);
+        return $this->hasOne(User::class);
     }
 
-    public function park(): BelongsTo
+    /**
+     * Each location has one park.
+     */
+    public function park(): HasOne
     {
-        return $this->belongsTo(Park::class);
+        return $this->hasOne(Park::class);
     }
 
     public function coordinates(): Attribute

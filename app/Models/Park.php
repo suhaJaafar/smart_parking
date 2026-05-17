@@ -32,7 +32,7 @@ class Park extends Model
      * --------------------------------------------------------------------- */
 
     /**
-     * Each park stores its location_id locally — that's a BelongsTo, not HasOne.
+     * Each park has one location.
      */
     public function location(): BelongsTo
     {
@@ -45,8 +45,7 @@ class Park extends Model
     }
 
     /**
-     * The space owner (a user with the SPACE_OWNER role) who owns this park.
-     * FK column on `parks` is `user_id`.
+     * Each park has a user space owner
      */
     public function owner(): BelongsTo
     {

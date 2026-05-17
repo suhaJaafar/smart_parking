@@ -17,7 +17,7 @@ return new class extends Migration
             $table->string('email')->unique();
             $table->string('password');
             $table->string('phone_number');
-            $table->uuid('location_id')->nullable();
+            $table->uuid('location_id')->nullable()->unique();
             $table->rememberToken();
             $table->timestamps();
         });

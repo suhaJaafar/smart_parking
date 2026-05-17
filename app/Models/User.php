@@ -71,8 +71,7 @@ class User extends Authenticatable implements JWTSubject
     }
 
     /**
-     * Get the location associated with the user.
-     * users.location_id is the FK, so this is BelongsTo (not HasOne).
+     * Each user has one location.
      */
     public function location(): BelongsTo
     {

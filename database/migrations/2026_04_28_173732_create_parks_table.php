@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('parks', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->string('name');
-            $table->uuid('location_id')->unique();
+            $table->uuid('location_id')->nullable()->unique();
             $table->foreignUuid('user_id')->nullable()->constrained('users')->nullOnDelete();
             $table->integer('capacity')->default(0);
             $table->integer('free_spaces')->default(0);
