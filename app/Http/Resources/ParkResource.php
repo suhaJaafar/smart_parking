@@ -21,6 +21,11 @@ class ParkResource extends JsonResource
             'capacity'    => $this->capacity,
             'free_spaces' => $this->free_spaces,
             'location'    => new LocationResource($this->whenLoaded('location')),
+            'owner'       => $this->whenLoaded('owner', fn () => [
+                'id'    => $this->owner?->id,
+                'name'  => $this->owner?->name,
+                'email' => $this->owner?->email,
+            ]),
             'created_at'  => $this->created_at?->toIso8601String(),
             'updated_at'  => $this->updated_at?->toIso8601String(),
         ];

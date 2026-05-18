@@ -52,7 +52,7 @@ class ParkController extends Controller
             owner:        $request->user(),
         );
 
-        return (new ParkResource($park->with('location')))
+        return (new ParkResource($park->load(['location', 'owner:id,name,email'])))
             ->response()
             ->setStatusCode(HttpResponse::HTTP_CREATED);
     }
@@ -69,18 +69,18 @@ class ParkController extends Controller
     {
         $park = $this->parks->findById($id);
         abort_if($park === null, HttpResponse::HTTP_NOT_FOUND);
-        abort_if($park->user_id !== $request->user()->id, HttpResponse::HTTP_FORBIDDEN);
+        $this->authorize('update', $park);
 
         $park = $this->parks->update($park, $request->validated());
 
-        return new ParkResource($park->load('location'));
+        return new ParkResource($park->load(['location', 'owner:id,name,email']));
     }
 
     public function destroy(Request $request, string $id): Response
     {
         $park = $this->parks->findById($id);
         abort_if($park === null, HttpResponse::HTTP_NOT_FOUND);
-        abort_if($park->user_id !== $request->user()->id, HttpResponse::HTTP_FORBIDDEN);
+        $this->authorize('delete', $park);
 
         $this->parks->delete($park);
 

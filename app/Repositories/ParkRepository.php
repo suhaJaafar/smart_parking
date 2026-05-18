@@ -11,7 +11,7 @@ class ParkRepository implements ParkRepositoryInterface
 {
     public function findById(string $id): ?Park
     {
-        return Park::with('location')->find($id);
+        return Park::with(['location', 'owner:id,name,email'])->find($id);
     }
 
     public function create(array $data): Park
@@ -33,12 +33,12 @@ class ParkRepository implements ParkRepositoryInterface
 
     public function paginate(int $perPage = 10): LengthAwarePaginator
     {
-        return Park::with('location')->latest()->paginate($perPage);
+        return Park::with(['location', 'owner:id,name,email'])->latest()->paginate($perPage);
     }
 
     public function paginateByOwner(User $owner, int $perPage = 10): LengthAwarePaginator
     {
-        return Park::with('location')
+        return Park::with(['location', 'owner:id,name,email'])
             ->where('user_id', $owner->id)
             ->latest()
             ->paginate($perPage);

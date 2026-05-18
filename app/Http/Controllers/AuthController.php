@@ -58,7 +58,11 @@ class AuthController extends Controller
     // Get authenticated user details
     public function user()
     {
-        return response()->json(auth()->user());
+        $user = auth()->user();
+        if ($user) {
+            $user->load('roles');
+        }
+        return response()->json($user);
     }
 
     // Logout the user
