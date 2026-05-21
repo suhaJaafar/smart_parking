@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\ParkRequest;
 use App\Http\Requests\StoreParkRequest;
 use App\Http\Resources\ParkResource;
+use App\Models\User;
 use App\Repositories\Contracts\ParkRepositoryInterface;
 use App\Services\ParkService;
 use Illuminate\Http\JsonResponse;
@@ -40,16 +41,25 @@ class ParkController extends Controller
     }
 
     /**
-     * Create a park together with its location, atomically.
+     * Create a park together with its location, automatically.
      *
-     * The owner is the currently authenticated user.
+     * Owner resolution:
+     *  - If the request carries a validated `user_id` (only possible when the
+     *    actor is SUPER_ADMIN — see StoreParkRequest), that user becomes the
+     *    owner. The ParkService will also promote them to SPACE_OWNER.
+     *  - Otherwise the park is owned by the authenticated user.
      */
     public function store(StoreParkRequest $request): JsonResponse
     {
+        $ownerId = $request->ownerOverrideId();
+        $owner   = $ownerId !== null
+            ? User::findOrFail($ownerId)
+            : $request->user();
+
         $park = $this->parkService->createWithLocation(
             locationData: $request->locationData(),
             parkData:     $request->parkData(),
-            owner:        $request->user(),
+            owner:        $owner,
         );
 
         return (new ParkResource($park->load(['location', 'owner:id,name,email'])))

@@ -14,10 +14,19 @@ class UserController extends Controller
 {
         /**
         * Display a listing of the resource.
+        *
+        * Accepts an optional `?per_page=N` query parameter (capped at 100) so
+        * UIs that need a fuller listing (e.g. the SUPER_ADMIN park-owner
+        * picker) don't have to page through the default 10-per-page slices.
         */
-        public function index()
+        public function index(\Illuminate\Http\Request $request)
         {
-            $users = User::with('roles')->paginate(10);
+            $perPage = min(
+                max((int) $request->integer('per_page', 10), 1),
+                100,
+            );
+
+            $users = User::with('roles')->paginate($perPage);
             return UserResource::collection($users);
         }
 

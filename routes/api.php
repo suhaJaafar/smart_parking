@@ -42,6 +42,11 @@ Route::middleware('auth:api')->group(function () {
         Route::get('admin/stats', [App\Http\Controllers\AdminController::class, 'stats']);
     });
 
+    // Space-owner routes — scoped to the authenticated user's own parks.
+    Route::middleware('role:SPACE_OWNER,SUPER_ADMIN')->group(function () {
+        Route::get('owner/stats', [App\Http\Controllers\OwnerController::class, 'stats']);
+    });
+
     // Customer-only routes
     Route::middleware('role:USER')->group(function () {
         Route::get('customer/parks/nearby', [App\Http\Controllers\CustomerController::class, 'nearbyParks']);

@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Enums\CountryTypes;
+use App\Enums\RoleTypes;
 use App\Enums\StateTypes;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -10,17 +11,33 @@ use Illuminate\Validation\Rule;
 /**
  * Validates the payload for creating a park together with its location.
  *
- * The client sends lat/lng + park fields in a single flat JSON body. The
- * `user_id` (park owner) is intentionally NOT accepted here — it is taken
- * from the authenticated user inside the controller to prevent forgery.
+ * The client sends lat/lng + park fields in a single flat JSON body.
+ *
+ * Ownership rules:
+ *  - By default the park is owned by the authenticated user.
+ *  - SUPER_ADMIN may pass an explicit `user_id` to assign ownership to
+ *    another user. For all other roles, any `user_id` value in the payload
+ *    is stripped before validation so it cannot be forged.
  */
 class StoreParkRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        // Role-level authorization (SPACE_OWNER) is enforced by the route
-        // middleware. We only need to ensure the user is authenticated here.
+        // Route middleware enforces role-level access; here we just need to
+        // ensure the request is authenticated.
         return $this->user() !== null;
+    }
+
+    /**
+     * Strip `user_id` from the input unless the actor is allowed to assign
+     * ownership. Done in `prepareForValidation` (before rules run) so that
+     * forged fields never reach the validated set.
+     */
+    protected function prepareForValidation(): void
+    {
+        if (! $this->canAssignOwner()) {
+            $this->request->remove('user_id');
+        }
     }
 
     /**
@@ -34,6 +51,9 @@ class StoreParkRequest extends FormRequest
             'capacity'      => ['required', 'integer', 'min:1'],
             'free_spaces'   => ['nullable', 'integer', 'min:0', 'lte:capacity'],
 
+            // Optional owner override (SUPER_ADMIN only).
+            'user_id'       => ['sometimes', 'uuid', Rule::exists('users', 'id')],
+
             // Location fields (mirrors LocationRequest)
             'country'       => ['required', Rule::enum(CountryTypes::class)],
             'state'         => ['required', Rule::enum(StateTypes::class)],
@@ -43,6 +63,16 @@ class StoreParkRequest extends FormRequest
             'longitude'     => ['required', 'numeric', 'between:-180,180'],
             'extra_details' => ['nullable', 'string', 'max:1000'],
         ];
+    }
+
+    /**
+     * The validated owner UUID if the actor is allowed to assign ownership
+     * AND supplied one. Otherwise `null` (controller will fall back to the
+     * authenticated user).
+     */
+    public function ownerOverrideId(): ?string
+    {
+        return $this->safe()->only(['user_id'])['user_id'] ?? null;
     }
 
     /**
@@ -66,5 +96,21 @@ class StoreParkRequest extends FormRequest
         $data['free_spaces'] ??= $data['capacity'];
 
         return $data;
+    }
+
+    /**
+     * Whether the authenticated user is allowed to assign a different owner.
+     * Mirrors the SUPER_ADMIN check used elsewhere (e.g. ParkPolicy::before).
+     */
+    private function canAssignOwner(): bool
+    {
+        $user = $this->user();
+        if ($user === null) {
+            return false;
+        }
+
+        return $user->roles()
+            ->where('role', RoleTypes::SUPER_ADMIN->value)
+            ->exists();
     }
 }
