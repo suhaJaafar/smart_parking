@@ -76,7 +76,7 @@ class ParkController extends Controller
             'location',
             'owner:id,name,email',
             'cars' => fn ($q) => $q->whereNotNull('park_id')
-                ->with('user:id,name,email'),
+                ->with('user:id,phone_number'),
         ]);
 
         return new ParkResource($park);
