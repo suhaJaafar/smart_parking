@@ -26,6 +26,7 @@ class ParkResource extends JsonResource
                 'name'  => $this->owner?->name,
                 'email' => $this->owner?->email,
             ]),
+            'cars' => CarResource::collection($this->whenLoaded('cars')),
             'created_at'  => $this->created_at?->toIso8601String(),
             'updated_at'  => $this->updated_at?->toIso8601String(),
         ];

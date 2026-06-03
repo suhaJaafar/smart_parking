@@ -72,6 +72,13 @@ class ParkController extends Controller
         $park = $this->parks->findById($id);
         abort_if($park === null, HttpResponse::HTTP_NOT_FOUND);
 
+        $park->load([
+            'location',
+            'owner:id,name,email',
+            'cars' => fn ($q) => $q->whereNotNull('park_id')
+                ->with('user:id,name,email'),
+        ]);
+
         return new ParkResource($park);
     }
 
