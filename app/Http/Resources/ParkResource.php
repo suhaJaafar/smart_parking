@@ -17,6 +17,7 @@ class ParkResource extends JsonResource
         return [
             'id'          => $this->id,
             'name'        => $this->name,
+            // TODO: WHY we add user_id here? we have owner relationship, and we can get user_id from there.
             'user_id'     => $this->user_id,
             'capacity'    => $this->capacity,
             'free_spaces' => $this->free_spaces,

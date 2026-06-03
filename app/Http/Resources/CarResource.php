@@ -19,6 +19,9 @@ class CarResource extends JsonResource
             'model' => $this->model,
             'car_number' => $this->car_number,
             'park_id' => $this->park_id,
+            'user' => $this->whenLoaded('user', fn () => [
+                'phone_number' => $this->user->phone_number,
+            ]),
         ];
     }
 }
