@@ -6,6 +6,8 @@ use App\Enums\RoleTypes;
 use App\Models\Role;
 use App\Models\User;
 use App\Models\WhatsAppSession;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 
 /**
  * First-contact flow for unknown phone numbers.
@@ -198,7 +200,7 @@ class OnboardingFlow
         $user = User::create([
             'name'         => $this->generateDefaultName($phone),
             'email'        => "{$phone}@whatsapp.parkiq.local",
-            'password'     => bcrypt(str()->random(32)),
+            'password'     => $this->unusablePassword(),
             'phone_number' => $phone,
         ]);
 
@@ -206,6 +208,20 @@ class OnboardingFlow
         $user->roles()->sync([$roleRow->id]);
 
         return $user->load('roles');
+    }
+
+    /**
+     * Bot-provisioned accounts have no usable password — their auth path is
+     * WhatsApp (phone-based). We still hash a cryptographically random secret
+     * so the column is never empty and constant-time comparisons in any
+     * future password check cannot succeed by accident.
+     *
+     * When we later expose a "set web password" flow (e.g. via WhatsApp OTP),
+     * it will simply overwrite this hash through the normal Hash::make path.
+     */
+    private function unusablePassword(): string
+    {
+        return Hash::make(Str::password(40));
     }
 
     /**

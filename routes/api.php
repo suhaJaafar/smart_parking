@@ -8,6 +8,14 @@ use Illuminate\Support\Facades\Route;
 Route::post('register', [AuthController::class, 'register']);
 Route::post('login', [AuthController::class, 'login']);
 
+// WhatsApp OTP login — passwordless auth for accounts created via the bot.
+// Throttled per-IP to blunt enumeration / brute-force; the service layer
+// adds its own per-phone cooldown and per-code attempt cap.
+Route::middleware('throttle:10,1')->group(function () {
+    Route::post('auth/whatsapp/request-code', [AuthController::class, 'requestWhatsAppCode']);
+    Route::post('auth/whatsapp/verify-code',  [AuthController::class, 'verifyWhatsAppCode']);
+});
+
 Route::middleware('auth:api')->group(function () {
     Route::get('user', [AuthController::class, 'user']);
     Route::post('logout', [AuthController::class, 'logout']);
