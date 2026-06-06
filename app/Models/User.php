@@ -110,4 +110,12 @@ class User extends Authenticatable implements JWTSubject
     {
         return $this->hasMany(Reserve::class);
     }
+
+    /**
+     * Payments made by this user (only relevant for CUSTOMER role).
+     */
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class);
+    }
 }

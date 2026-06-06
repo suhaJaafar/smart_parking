@@ -41,5 +41,13 @@ return [
         'app_secret'      => env('WHATSAPP_APP_SECRET'),
         'api_version'     => env('WHATSAPP_API_VERSION', 'v18.0'),
     ],
+    'qicard' => [
+        'base_url'    => env('QICARD_BASE_URL'),
+        'username'    => env('QICARD_USERNAME'),
+        'password'    => env('QICARD_PASSWORD'),
+        'terminal_id' => env('QICARD_TERMINAL_ID'),
+        'currency'    => env('QICARD_CURRENCY', 'IQD'),
+        'public_url'  => env('QICARD_PUBLIC_URL'),
+],
 
 ];

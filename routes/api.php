@@ -3,7 +3,7 @@
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\WhatsAppController;
 use Illuminate\Support\Facades\Route;
-
+use App\Http\Controllers\PaymentController;
 
 Route::post('register', [AuthController::class, 'register']);
 Route::post('login', [AuthController::class, 'login']);
@@ -67,3 +67,4 @@ Route::middleware('auth:api')->group(function () {
 Route::get('/webhook', [WhatsAppController::class, 'verify']);
 Route::post('/webhook', [WhatsAppController::class, 'receive'])
     ->middleware('whatsapp.signed');
+Route::post('/payments/qicard/webhook', [PaymentController::class, 'webhook']);

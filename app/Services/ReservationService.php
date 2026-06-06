@@ -6,6 +6,7 @@ use App\Models\Park;
 use App\Models\Reserve;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 class ReservationService
@@ -27,6 +28,11 @@ class ReservationService
      * @throws RuntimeException if the park is full or user already holds a
      *                          pending reservation at this park.
      */
+
+    public function __construct(
+        private readonly \App\Services\Payments\PaymentService $payments,
+    ) {}
+
     public function reserve(User $user, Park $park): Reserve
     {
         return DB::transaction(function () use ($user, $park) {
@@ -86,7 +92,7 @@ class ReservationService
      */
     public function markActive(User $user, Park $park): ?Reserve
     {
-        return DB::transaction(function () use ($user, $park) {
+        $reserve = DB::transaction(function () use ($user, $park) {
             $reserve = Reserve::where('user_id', $user->id)
                 ->where('park_id', $park->id)
                 ->where('status', Reserve::STATUS_START)
@@ -101,6 +107,22 @@ class ReservationService
             $reserve->update(['status' => Reserve::STATUS_ACTIVE]);
             return $reserve->fresh();
         });
+
+        // Create the payment row AFTER the activation transaction commits.
+        // If Qi/DB is flaky we don't want to roll back a successful car entry
+        // — the customer's car is already physically in the spot.
+        if ($reserve) {
+            try {
+                $this->payments->ensureForReserve($reserve);
+            } catch (\Throwable $e) {
+                Log::error('ensureForReserve failed after markActive', [
+                    'reserve_id' => $reserve->id,
+                    'error'      => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return $reserve;
     }
 
     /**

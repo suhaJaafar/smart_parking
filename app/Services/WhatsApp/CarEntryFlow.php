@@ -2,9 +2,11 @@
 
 namespace App\Services\WhatsApp;
 
+use App\Enums\PaymentStatusTypes;
 use App\Enums\RoleTypes;
 use App\Models\Car;
 use App\Models\Park;
+use App\Models\Reserve;
 use App\Models\User;
 use App\Models\WhatsAppSession;
 use App\Services\CarService;
@@ -143,7 +145,7 @@ class CarEntryFlow
             );
 
             if ($heldReservation !== null) {
-                $this->reservations->markActive($carOwner, $park);
+                $activeReservation = $this->reservations->markActive($carOwner, $park);
             }
         } catch (Throwable $e) {
             Log::error('WA car enter failed', ['error' => $e->getMessage()]);
@@ -156,7 +158,13 @@ class CarEntryFlow
         // Notify the customer their car has been registered as parked.
         // Best-effort — the WhatsAppNotifier swallows its own errors so a
         // failed notification cannot break the owner's flow.
-        $this->notifyCustomer($carOwner, $park, $car, $heldReservation !== null);
+        $this->notifyCustomer(
+            $carOwner,
+            $park,
+            $car,
+            $heldReservation !== null,
+            $activeReservation ?? null,
+        );
 
         $arrivalNote = $heldReservation !== null
             ? "✅ تم تأكيد وصول العميل! (الحجز مكتمل)\n"
@@ -172,8 +180,13 @@ class CarEntryFlow
      * Tell the car's owner (the customer) that their vehicle was just
      * checked into the park by the SPACE_OWNER.
      */
-    private function notifyCustomer(User $carOwner, Park $park, Car $car, bool $fulfilledReservation): void
-    {
+    private function notifyCustomer(
+        User $carOwner,
+        Park $park,
+        Car $car,
+        bool $fulfilledReservation,
+        ?Reserve $reserve = null,
+    ): void {
         $phone = $carOwner->phone_number;
         if (!$phone) {
             return;
@@ -187,6 +200,24 @@ class CarEntryFlow
               . "🅿️ الموقف: {$park->name}\n"
               . "🚗 اللوحة: {$car->plate_prefix}-{$car->car_number}\n"
               . "🕒 وقت الدخول: " . now()->setTimezone(config('app.timezone'))->format('Y-m-d H:i');
+
+        // If a reservation was just activated, append a pay link so the
+        // customer can settle electronically. Falls back silently to cash
+        // when no payment row exists.
+        if ($reserve) {
+            $payment = $reserve->payments()
+                ->whereIn('status', [
+                    PaymentStatusTypes::CREATED->value,
+                    PaymentStatusTypes::SUCCESS->value,
+                ])
+                ->latest()
+                ->first();
+
+            if ($payment && !$payment->isPaid()) {
+                $url = route('payments.redirect', $payment->token);
+                $body .= "\n\n💳 لإتمام الدفع إلكترونياً:\n{$url}\n\nأو يمكنك الدفع نقداً عند الخروج.";
+            }
+        }
 
         $this->notifier->send($phone, $body);
     }
