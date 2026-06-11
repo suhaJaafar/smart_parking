@@ -10,8 +10,8 @@ use App\Http\Requests\WhatsAppVerifyCodeRequest;
 use App\Http\Resources\RegisterResource;
 use App\Models\Role;
 use App\Models\User;
-use App\Services\WhatsApp\WhatsAppNotifier;
-use App\Services\WhatsApp\WhatsAppOtpService;
+use App\Bots\Channels\WhatsApp\WhatsAppNotifier;
+use App\Bots\Channels\WhatsApp\WhatsAppOtpService;
 use Illuminate\Support\Facades\Hash;
 use Tymon\JWTAuth\Facades\JWTAuth;
 

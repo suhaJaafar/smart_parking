@@ -42,4 +42,27 @@ return [
         'api_version'     => env('WHATSAPP_API_VERSION', 'v18.0'),
     ],
 
+    'telegram' => [
+        // From @BotFather. Required to talk to the Bot API.
+        'bot_token'      => env('TELEGRAM_BOT_TOKEN'),
+
+        // Shared secret echoed by Telegram in `X-Telegram-Bot-Api-Secret-Token`
+        // on every webhook delivery. Set this when registering the webhook
+        // via `setWebhook?url=…&secret_token=…`.
+        'webhook_secret' => env('TELEGRAM_WEBHOOK_SECRET'),
+
+        // Override only if you run your own Bot API server (Telegram supports
+        // self-hosted bots — the official endpoint is the default).
+        'api_base_url'   => env('TELEGRAM_API_BASE_URL', 'https://api.telegram.org'),
+    ],
+
+    'qicard' => [
+        'base_url'    => env('QICARD_BASE_URL'),
+        'username'    => env('QICARD_USERNAME'),
+        'password'    => env('QICARD_PASSWORD'),
+        'terminal_id' => env('QICARD_TERMINAL_ID'),
+        'currency'    => env('QICARD_CURRENCY', 'IQD'),
+        'public_url'  => env('QICARD_PUBLIC_URL'),
+    ],
+
 ];

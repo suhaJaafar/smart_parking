@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Services\WhatsApp;
+namespace App\Bots\Support;
 
 use App\Enums\RoleTypes;
 use App\Models\Reserve;
@@ -9,16 +9,16 @@ use App\Models\User;
 /**
  * Builds the bot's role-aware main menu and its active-reservation banner.
  *
- * Extracted out of WhatsAppController so flows (e.g. OnboardingFlow) can
- * render the post-action menu inline without needing to ask the user to
- * send "القائمة" as a second message.
+ * Channel-agnostic — flows for both WhatsApp and Telegram render through
+ * the same Markdown-flavoured text. Each transport is responsible for any
+ * channel-specific escaping.
  */
 class MenuRenderer
 {
     /**
      * Full menu, including a top banner if the user has an active reservation.
-     * `$user` may be null (unknown phone) — in that case we render a generic
-     * welcome with no role-specific options.
+     * `$user` may be null (unknown phone/chat) — in that case we render a
+     * generic welcome with no role-specific options.
      */
     public function for(?User $user): string
     {

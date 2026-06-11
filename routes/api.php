@@ -1,7 +1,9 @@
 <?php
 
+use App\Bots\Channels\Telegram\TelegramController;
+use App\Bots\Channels\WhatsApp\WhatsAppController;
 use App\Http\Controllers\AuthController;
-use App\Http\Controllers\WhatsAppController;
+use App\Http\Controllers\PaymentController;
 use Illuminate\Support\Facades\Route;
 
 
@@ -67,3 +69,20 @@ Route::middleware('auth:api')->group(function () {
 Route::get('/webhook', [WhatsAppController::class, 'verify']);
 Route::post('/webhook', [WhatsAppController::class, 'receive'])
     ->middleware('whatsapp.signed');
+
+// ===============================
+// TELEGRAM WEBHOOK ENDPOINT
+// ===============================
+// Telegram has no GET handshake — webhooks are registered out-of-band via
+// the Bot API's `setWebhook` endpoint. Auth is the secret token echoed
+// back in the `X-Telegram-Bot-Api-Secret-Token` header on every delivery.
+Route::post('/telegram/webhook', [TelegramController::class, 'receive'])
+    ->middleware('telegram.signed');
+
+// ===============================
+// QICARD PAYMENT WEBHOOK
+// ===============================
+// Server-to-server notification from QiCard. We never trust the body —
+// we look up the row by paymentId/requestId, re-fetch authoritative
+// status from Qi, and always ACK 200 (Qi doesn't read our response).
+Route::post('/payments/qicard/webhook', [PaymentController::class, 'webhook']);

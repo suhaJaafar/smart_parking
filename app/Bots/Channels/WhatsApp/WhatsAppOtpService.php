@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Services\WhatsApp;
+namespace App\Bots\Channels\WhatsApp;
 
 use App\Models\User;
 use Illuminate\Support\Facades\Cache;
@@ -9,15 +9,16 @@ use Illuminate\Support\Facades\Hash;
 /**
  * Issue and verify one-time codes delivered over WhatsApp.
  *
- * The bot already authenticates users by `phone_number`, so the web/dashboard
- * needs no password — just the same channel. This service is the single
- * source of truth for code lifecycle:
+ * The bot already authenticates users by `phone_number`, so the
+ * web/dashboard needs no password — just the same channel. This service
+ * is the single source of truth for code lifecycle:
  *
- *   issue($phone)  → stores hash($code) in cache with TTL, returns plain code
- *   verify($phone, $code) → constant-time check, then returns the User
+ *   issue($phone)            → store hash($code) in cache with TTL, return plain code
+ *   verify($phone, $code)    → constant-time check, then return the User
  *
- * Hashing avoids leaking valid codes if the cache store is later moved to a
- * shared driver (Redis, etc). Attempt counters short-circuit brute force.
+ * Hashing avoids leaking valid codes if the cache store is later moved
+ * to a shared driver (Redis, etc). Attempt counters short-circuit brute
+ * force.
  */
 class WhatsAppOtpService
 {
@@ -36,9 +37,6 @@ class WhatsAppOtpService
     /**
      * Generate a fresh code for a phone and store its hash. Returns the
      * plaintext code so the caller can dispatch it via WhatsApp.
-     *
-     * Replaces any previously-issued code for the same phone (the user
-     * just requested a new one — invalidate the old one).
      */
     public function issue(string $phone): string
     {
@@ -54,9 +52,6 @@ class WhatsAppOtpService
         return $code;
     }
 
-    /**
-     * Whether the caller must wait before requesting another code.
-     */
     public function isOnCooldown(string $phone): bool
     {
         return Cache::has($this->cooldownKey($phone));
@@ -65,8 +60,7 @@ class WhatsAppOtpService
     /**
      * Verify a submitted code. Returns the matching User on success,
      * or null on any failure (wrong code, expired, too many attempts,
-     * no user with that phone). The cache entry is consumed on success
-     * and on terminal failure so the same code can't be reused.
+     * no user with that phone).
      */
     public function verify(string $phone, string $code): ?User
     {
@@ -96,11 +90,6 @@ class WhatsAppOtpService
         return $this->resolveUser($phone);
     }
 
-    /**
-     * Look up the User this phone belongs to. Mirrors the lookup logic
-     * already used in WhatsAppController so a number stored without a
-     * leading 0 still matches when the dashboard sends a local format.
-     */
     public function resolveUser(string $phone): ?User
     {
         return User::where('phone_number', $phone)

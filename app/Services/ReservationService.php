@@ -5,7 +5,9 @@ namespace App\Services;
 use App\Models\Park;
 use App\Models\Reserve;
 use App\Models\User;
+use App\Services\Payments\PaymentService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 class ReservationService
@@ -14,6 +16,10 @@ class ReservationService
      * How long an unclaimed reservation holds a space before it auto-expires.
      */
     public const HOLD_MINUTES = 30;
+
+    public function __construct(
+        private readonly PaymentService $payments,
+    ) {}
 
     /**
      * Atomically place a hold (status = START) on one space at $park for $user.
@@ -82,11 +88,18 @@ class ReservationService
      * Does NOT touch park.free_spaces — the slot was already debited at
      * reservation time and the car is now physically occupying it.
      *
+     * Side effect: provisions a {@see \App\Models\Payment} row for the
+     * just-activated reservation so the customer can settle the bill
+     * electronically via the pay link in their bot notification. This
+     * happens AFTER the activation transaction commits — if Qi/DB is
+     * flaky we still keep the car-entry: the customer's vehicle is
+     * already physically in the spot, rolling that back would be wrong.
+     *
      * Idempotent: returns null if there is no pending hold to activate.
      */
     public function markActive(User $user, Park $park): ?Reserve
     {
-        return DB::transaction(function () use ($user, $park) {
+        $reserve = DB::transaction(function () use ($user, $park) {
             $reserve = Reserve::where('user_id', $user->id)
                 ->where('park_id', $park->id)
                 ->where('status', Reserve::STATUS_START)
@@ -101,6 +114,19 @@ class ReservationService
             $reserve->update(['status' => Reserve::STATUS_ACTIVE]);
             return $reserve->fresh();
         });
+
+        if ($reserve) {
+            try {
+                $this->payments->ensureForReserve($reserve);
+            } catch (\Throwable $e) {
+                Log::error('ensureForReserve failed after markActive', [
+                    'reserve_id' => $reserve->id,
+                    'error'      => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return $reserve;
     }
 
     /**
