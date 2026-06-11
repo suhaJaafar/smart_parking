@@ -28,6 +28,7 @@ class User extends Authenticatable implements JWTSubject
         'email',
         'password',
         'phone_number',
+        'telegram_chat_id',
         'location_id',
     ];
 
@@ -109,5 +110,13 @@ class User extends Authenticatable implements JWTSubject
     public function reserves(): HasMany
     {
         return $this->hasMany(Reserve::class);
+    }
+
+    /**
+     * Payments made by this user (only relevant for CUSTOMER role).
+     */
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class);
     }
 }

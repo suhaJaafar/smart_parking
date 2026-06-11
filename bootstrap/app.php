@@ -14,10 +14,12 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->preventRequestForgery(except: [
         'webhook',
+        'telegram/webhook',
     ]);
         $middleware->alias([
             'role'             => \App\Http\Middleware\CheckRole::class,
-            'whatsapp.signed'  => \App\Http\Middleware\VerifyWhatsAppSignature::class,
+            'whatsapp.signed'  => \App\Bots\Channels\WhatsApp\VerifyWhatsAppSignature::class,
+            'telegram.signed'  => \App\Bots\Channels\Telegram\VerifyTelegramSecret::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

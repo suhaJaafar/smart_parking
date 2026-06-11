@@ -1,19 +1,20 @@
 <?php
 
-namespace App\Services\WhatsApp;
+namespace App\Bots\Flows;
 
+use App\Bots\Contracts\BotSession;
+use App\Bots\Dto\OutboundReply;
+use App\Bots\Support\Prompt;
 use App\Enums\RoleTypes;
 use App\Models\Car;
 use App\Models\Park;
-use App\Models\WhatsAppSession;
 use App\Services\CarService;
 use App\Services\ReservationService;
-use App\Services\WhatsApp\Prompt;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * One-step flow for a SPACE_OWNER to take a car OUT of their park via WhatsApp.
+ * One-step flow for a SPACE_OWNER to take a car OUT of their park.
  *
  * Steps: plate → done.
  */
@@ -27,7 +28,7 @@ class CarExitFlow
         private readonly ReservationService $reservations,
     ) {}
 
-    public function handle(WhatsAppSession $session, string $message): ?string
+    public function handle(BotSession $session, string $message): OutboundReply
     {
         if ($session->isExpired()) {
             $session->reset();
@@ -35,34 +36,34 @@ class CarExitFlow
 
         if (in_array(mb_strtolower(trim($message)), ['cancel', 'الغاء', 'إلغاء'], true)) {
             $session->reset();
-            return "تم إلغاء العملية.";
+            return OutboundReply::text("تم إلغاء العملية.");
         }
 
-        if ($session->step === 'idle') {
+        if ($session->getStep() === 'idle') {
             return $this->start($session);
         }
 
-        return match ($session->step) {
+        return match ($session->getStep()) {
             'plate' => $this->finish($session, $message),
-            default => null,
+            default => OutboundReply::empty(),
         };
     }
 
-    private function start(WhatsAppSession $session): string
+    private function start(BotSession $session): OutboundReply
     {
-        $owner = $session->user;
+        $owner = $session->getUser();
 
         if (!$owner) {
-            return "📱 رقمك غير مسجل في النظام.";
+            return OutboundReply::text("📱 حسابك غير مسجل في النظام.");
         }
 
         if (!$owner->roles()->where('role', RoleTypes::SPACE_OWNER->value)->exists()) {
-            return "🚫 هذه العملية متاحة لمالكي المواقف فقط.";
+            return OutboundReply::text("🚫 هذه العملية متاحة لمالكي المواقف فقط.");
         }
 
         $park = $owner->ownedParks()->first();
         if (!$park) {
-            return "🚫 لا يوجد موقف مسجل باسمك.";
+            return OutboundReply::text("🚫 لا يوجد موقف مسجل باسمك.");
         }
 
         $session->update([
@@ -72,17 +73,21 @@ class CarExitFlow
             'expires_at' => now()->addMinutes(self::TTL_MINUTES),
         ]);
 
-        return Prompt::ask("🚙 أرسل لوحة السيارة الخارجة (مثال: BG-12345)");
+        return OutboundReply::text(
+            Prompt::ask("🚙 أرسل لوحة السيارة الخارجة (مثال: BG-12345)")
+        );
     }
 
-    private function finish(WhatsAppSession $session, string $message): string
+    private function finish(BotSession $session, string $message): OutboundReply
     {
         $message = mb_strtoupper(trim($message));
         if (!preg_match('/^([A-Z]{1,8})[\s\-]+([0-9]{1,20})$/u', $message, $m)) {
-            return Prompt::ask("⚠️ صيغة اللوحة غير صحيحة. مثال: BG-12345");
+            return OutboundReply::text(
+                Prompt::ask("⚠️ صيغة اللوحة غير صحيحة. مثال: BG-12345")
+            );
         }
 
-        $data    = $session->data ?? [];
+        $data    = $session->getData();
         $parkId  = $data['park_id'] ?? null;
 
         $car = Car::where('plate_prefix', $m[1])
@@ -91,12 +96,12 @@ class CarExitFlow
 
         if (!$car) {
             $session->reset();
-            return "❌ لا توجد سيارة بهذه اللوحة في النظام.";
+            return OutboundReply::text("❌ لا توجد سيارة بهذه اللوحة في النظام.");
         }
 
         if ($car->park_id !== $parkId) {
             $session->reset();
-            return "❌ هذه السيارة ليست داخل موقفك حالياً.";
+            return OutboundReply::text("❌ هذه السيارة ليست داخل موقفك حالياً.");
         }
 
         try {
@@ -106,9 +111,6 @@ class CarExitFlow
 
             $car = $this->carService->exitPark($car);
 
-            // Best-effort: if this customer had an ACTIVE reservation at this
-            // park, mark it completed now that the car has physically left.
-            // markCompleted() is idempotent — no-op when there's nothing to close.
             if ($carOwner) {
                 $park = Park::find($parkId);
                 if ($park) {
@@ -116,16 +118,18 @@ class CarExitFlow
                 }
             }
         } catch (Throwable $e) {
-            Log::error('WA car exit failed', ['error' => $e->getMessage()]);
+            Log::error('Bot car exit failed', ['error' => $e->getMessage()]);
             $session->reset();
-            return "❌ تعذّر إخراج السيارة: {$e->getMessage()}";
+            return OutboundReply::text("❌ تعذّر إخراج السيارة: {$e->getMessage()}");
         }
 
         $session->reset();
         $park = Park::find($parkId);
 
-        return "✅ تم إخراج السيارة!\n"
-             . "اللوحة: {$m[1]}-{$m[2]}\n"
-             . "الأماكن الفارغة: " . ($park?->free_spaces ?? '?');
+        return OutboundReply::text(
+            "✅ تم إخراج السيارة!\n"
+            . "اللوحة: {$m[1]}-{$m[2]}\n"
+            . "الأماكن الفارغة: " . ($park?->free_spaces ?? '?')
+        );
     }
 }

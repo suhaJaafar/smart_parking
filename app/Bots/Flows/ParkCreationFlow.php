@@ -1,23 +1,26 @@
 <?php
 
-namespace App\Services\WhatsApp;
+namespace App\Bots\Flows;
 
+use App\Bots\Contracts\BotSession;
+use App\Bots\Dto\OutboundReply;
+use App\Bots\Support\Prompt;
 use App\Enums\CountryTypes;
 use App\Enums\RoleTypes;
 use App\Enums\StateTypes;
-use App\Models\WhatsAppSession;
 use App\Services\ParkService;
-use App\Services\WhatsApp\Prompt;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * State-machine for creating a Park via WhatsApp.
+ * State-machine for creating a Park.
  *
  * Steps: name → capacity → location → done. The city is reverse-geocoded
  * from the shared location, not asked from the user.
- * State persists in the `whatsapp_sessions` table so it survives restarts.
+ *
+ * State persists in whichever channel session table (whatsapp_sessions /
+ * telegram_sessions) so it survives restarts.
  */
 class ParkCreationFlow
 {
@@ -28,42 +31,35 @@ class ParkCreationFlow
         private readonly ParkService $parkService,
     ) {}
 
-    /**
-     * Returns the bot reply (string or interactive payload), or null if no reply should be sent.
-     *
-     * @return string|array<string, mixed>|null
-     */
-    public function handle(WhatsAppSession $session, string $message): string|array|null
+    public function handle(BotSession $session, string $message): OutboundReply
     {
         if ($session->isExpired()) {
             $session->reset();
         }
 
-        // Cancel keyword
         if (in_array(mb_strtolower(trim($message)), ['cancel', 'الغاء', 'إلغاء'], true)) {
             $session->reset();
-            return "تم إلغاء العملية.";
+            return OutboundReply::text("تم إلغاء العملية.");
         }
 
-        // Entry point
-        if ($session->step === 'idle') {
+        if ($session->getStep() === 'idle') {
             return $this->start($session);
         }
 
-        return match ($session->step) {
+        return match ($session->getStep()) {
             'name'     => $this->askCapacity($session, $message),
             'capacity' => $this->askLocation($session, $message),
             'location' => $this->finish($session, $message),
-            default    => null,
+            default    => OutboundReply::empty(),
         };
     }
 
-    private function start(WhatsAppSession $session): string
+    private function start(BotSession $session): OutboundReply
     {
-        $user = $session->user;
+        $user = $session->getUser();
 
         if (!$user) {
-            return "📱 رقمك غير مسجل في النظام. الرجاء التسجيل أولاً.";
+            return OutboundReply::text("📱 حسابك غير مسجل في النظام. الرجاء التسجيل أولاً.");
         }
 
         $hasOwnerRole = $user->roles()
@@ -71,7 +67,7 @@ class ParkCreationFlow
             ->exists();
 
         if (!$hasOwnerRole) {
-            return "🚫 تحتاج صلاحية مالك موقف لإنشاء موقف.";
+            return OutboundReply::text("🚫 تحتاج صلاحية مالك موقف لإنشاء موقف.");
         }
 
         $session->update([
@@ -81,43 +77,47 @@ class ParkCreationFlow
             'expires_at' => now()->addMinutes(self::TTL_MINUTES),
         ]);
 
-        return Prompt::ask("📝 ما اسم الموقف؟");
+        return OutboundReply::text(Prompt::ask("📝 ما اسم الموقف؟"));
     }
 
-    private function askCapacity(WhatsAppSession $session, string $message): string
+    private function askCapacity(BotSession $session, string $message): OutboundReply
     {
         $name = trim($message);
         if ($name === '' || mb_strlen($name) > 255) {
-            return Prompt::ask("⚠️ اسم غير صالح. أرسل اسماً بين 1 و 255 حرف.");
+            return OutboundReply::text(
+                Prompt::ask("⚠️ اسم غير صالح. أرسل اسماً بين 1 و 255 حرف.")
+            );
         }
 
         $this->merge($session, ['name' => $name], 'capacity');
-        return Prompt::ask("🅿️ ما السعة الكلية؟ (رقم صحيح موجب)");
+        return OutboundReply::text(Prompt::ask("🅿️ ما السعة الكلية؟ (رقم صحيح موجب)"));
     }
 
-    private function askLocation(WhatsAppSession $session, string $message): string
+    private function askLocation(BotSession $session, string $message): OutboundReply
     {
         $msg = trim($message);
         if (!ctype_digit($msg) || (int) $msg < 1) {
-            return Prompt::ask("⚠️ أرسل رقماً صحيحاً موجباً للسعة.");
+            return OutboundReply::text(Prompt::ask("⚠️ أرسل رقماً صحيحاً موجباً للسعة."));
         }
 
         $cap = (int) $msg;
         $this->merge($session, ['capacity' => $cap, 'free_spaces' => $cap], 'location');
-        return Prompt::ask("📍 شارك موقعك عبر زر الموقع في واتساب\n_سيتم تحديد المدينة تلقائياً._");
+
+        return OutboundReply::text(
+            Prompt::ask("📍 شارك موقعك عبر زر الموقع في تطبيقك\n_سيتم تحديد المدينة تلقائياً._")
+        );
     }
 
-    /**
-     * @return string|array<string, mixed>
-     */
-    private function finish(WhatsAppSession $session, string $message): string|array
+    private function finish(BotSession $session, string $message): OutboundReply
     {
         [$lat, $lng] = $this->parseCoords($message);
         if ($lat === null) {
-            return Prompt::ask("⚠️ موقع غير صالح. أرسل: lat,lng (مثال: 33.31,44.38)");
+            return OutboundReply::text(
+                Prompt::ask("⚠️ موقع غير صالح. أرسل: lat,lng (مثال: 33.31,44.38)")
+            );
         }
 
-        $data = $session->data ?? [];
+        $data = $session->getData();
         $city = $this->reverseGeocodeCity($lat, $lng);
 
         try {
@@ -129,19 +129,19 @@ class ParkCreationFlow
                     'postal_code'   => null,
                     'latitude'      => $lat,
                     'longitude'     => $lng,
-                    'extra_details' => 'Created via WhatsApp',
+                    'extra_details' => 'Created via ' . $session->getChannel(),
                 ],
                 parkData: [
                     'name'        => $data['name'],
                     'capacity'    => $data['capacity'],
                     'free_spaces' => $data['free_spaces'],
                 ],
-                owner: $session->user,
+                owner: $session->getUser(),
             );
         } catch (Throwable $e) {
-            Log::error('WA park create failed', ['error' => $e->getMessage()]);
+            Log::error('Bot park create failed', ['error' => $e->getMessage()]);
             $session->reset();
-            return "❌ فشل إنشاء الموقف: {$e->getMessage()}";
+            return OutboundReply::text("❌ فشل إنشاء الموقف: {$e->getMessage()}");
         }
 
         $session->reset();
@@ -154,26 +154,23 @@ class ParkCreationFlow
               . "\n"
               . "أرسل *موقفي* لعرض جميع مواقفك، أو *القائمة* للقائمة الرئيسية.";
 
-        return [
-            'type'     => 'cta_url',
-            'body'     => $body,
-            'cta_text' => '🗺️ عرض الموقع',
-            'url'      => "https://www.google.com/maps?q={$park->lat},{$park->lng}",
-        ];
+        return OutboundReply::ctaUrl(
+            body:    $body,
+            ctaText: '🗺️ عرض الموقع',
+            url:     "https://www.google.com/maps?q={$park->lat},{$park->lng}",
+        );
     }
 
-    private function merge(WhatsAppSession $session, array $patch, string $nextStep): void
+    private function merge(BotSession $session, array $patch, string $nextStep): void
     {
         $session->update([
-            'data'       => array_merge($session->data ?? [], $patch),
+            'data'       => array_merge($session->getData(), $patch),
             'step'       => $nextStep,
             'expires_at' => now()->addMinutes(self::TTL_MINUTES),
         ]);
     }
 
     /**
-     * Accepts "lat,lng" text or a pre-built "lat,lng" from a WhatsApp location message.
-     *
      * @return array{0: ?float, 1: ?float}
      */
     private function parseCoords(string $message): array
@@ -201,7 +198,7 @@ class ParkCreationFlow
     {
         try {
             $response = Http::withHeaders([
-                    'User-Agent' => 'SmartParking/1.0 (whatsapp-bot)',
+                    'User-Agent'      => 'SmartParking/1.0 (bot)',
                     'Accept-Language' => 'ar,en',
                 ])
                 ->timeout(5)
