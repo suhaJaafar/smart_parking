@@ -75,13 +75,21 @@ class PaymentService
             notificationUrl:  config('services.qicard.public_url') . '/api/payments/qicard/webhook',
         );
 
-        $payment->update([
-            'payment_id' => $response['paymentId'],
-            'form_url'   => $response['formUrl'],
-            'qi_status'  => $response['status'],
-        ]);
+        return DB::transaction(function () use ($payment, $response) {
+            $fresh = Payment::whereKey($payment->id)->lockForUpdate()->first();
 
-        return $response['formUrl'];
+            if ($fresh->form_url && $fresh->isPending()) {
+                return $fresh->form_url;
+            }
+
+            $fresh->update([
+                'payment_id' => $response['paymentId'],
+                'form_url'   => $response['formUrl'],
+                'qi_status'  => $response['status'],
+            ]);
+
+            return $response['formUrl'];
+        });
     }
 
     public function reconcile(Payment $payment): Payment
@@ -96,25 +104,25 @@ class PaymentService
             default                                                => PaymentStatusTypes::CREATED,
         };
 
-        $wasPaid = $payment->isPaid();
+        [$payment, $justPaid] = DB::transaction(function () use ($payment, $internal, $response) {
+            $fresh   = Payment::whereKey($payment->id)->lockForUpdate()->first();
+            $wasPaid = $fresh->isPaid();
 
-        if (!$wasPaid) {
-            $update = [
-                'status'    => $internal,
-                'qi_status' => $response['status'] ?? null,
-            ];
-            if ($internal === PaymentStatusTypes::SUCCESS) {
-                $update['paid_at'] = now();
+            if (!$wasPaid) {
+                $update = [
+                    'status'    => $internal,
+                    'qi_status' => $response['status'] ?? null,
+                ];
+                if ($internal === PaymentStatusTypes::SUCCESS) {
+                    $update['paid_at'] = now();
+                }
+                $fresh->update($update);
             }
-            $payment->update($update);
-        }
 
-        $payment = $payment->fresh();
+            return [$fresh->fresh(), !$wasPaid && $internal === PaymentStatusTypes::SUCCESS];
+        });
 
-        // Fire customer + space-owner notifications on the pending → paid
-        // edge. Guarded by $wasPaid so a retried webhook for an already-
-        // paid row doesn't double-notify.
-        if (!$wasPaid && $internal === PaymentStatusTypes::SUCCESS) {
+        if ($justPaid) {
             $this->notifyPaymentSuccess($payment);
         }
 
