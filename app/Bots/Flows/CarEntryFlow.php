@@ -5,7 +5,9 @@ namespace App\Bots\Flows;
 use App\Bots\Contracts\BotNotifier;
 use App\Bots\Contracts\BotSession;
 use App\Bots\Dto\OutboundReply;
+use App\Bots\Support\DigitNormalizer;
 use App\Bots\Support\Prompt;
+use App\Data\CarPlate;
 use App\Enums\PaymentStatusTypes;
 use App\Enums\RoleTypes;
 use App\Models\Car;
@@ -95,16 +97,16 @@ class CarEntryFlow
 
     private function askIdentifier(BotSession $session, string $message): OutboundReply
     {
-        [$prefix, $number] = $this->parsePlate($message);
-        if ($prefix === null) {
+        $plate = CarPlate::fromString($message);
+        if ($plate === null) {
             return OutboundReply::text(
                 Prompt::ask("⚠️ صيغة اللوحة غير صحيحة. أرسل: PREFIX-NUMBER (مثال: BG-12345)")
             );
         }
 
         $this->merge($session, [
-            'plate_prefix' => $prefix,
-            'car_number'   => $number,
+            'plate_prefix' => $plate->prefix,
+            'car_number'   => $plate->number,
         ], 'identifier');
 
         return OutboundReply::text(
@@ -146,9 +148,11 @@ class CarEntryFlow
 
         try {
             $car = $this->carService->findOrCreateByPlate(
-                platePrefix: $data['plate_prefix'],
-                carNumber:   $data['car_number'],
-                owner:       $carOwner,
+                plate: new CarPlate(
+                    prefix: $data['plate_prefix'],
+                    number: $data['car_number'],
+                ),
+                owner: $carOwner,
             );
 
             // If the customer pre-reserved this slot via the bot, the slot
@@ -250,20 +254,6 @@ class CarEntryFlow
     }
 
     /**
-     * Parse "BG-12345" or "BG 12345" into ['BG', '12345'].
-     *
-     * @return array{0: ?string, 1: ?string}
-     */
-    private function parsePlate(string $message): array
-    {
-        $message = mb_strtoupper(trim($message));
-        if (!preg_match('/^([A-Z]{1,8})[\s\-]+([0-9]{1,20})$/u', $message, $m)) {
-            return [null, null];
-        }
-        return [$m[1], $m[2]];
-    }
-
-    /**
      * Normalize a free-form identifier into two digit strings:
      *  - $raw:        digits as the user typed them (just Arabic/Persian
      *                 → ASCII, then non-digits stripped). Preserved so a
@@ -288,12 +278,7 @@ class CarEntryFlow
         // 1. Translate Arabic-Indic (٠-٩) and Persian (۰-۹) digits → ASCII.
         //    MUST happen before \D stripping or the Arabic digits get
         //    treated as non-digits and dropped.
-        $ascii = strtr($input, [
-            '٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4',
-            '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9',
-            '۰' => '0', '۱' => '1', '۲' => '2', '۳' => '3', '۴' => '4',
-            '۵' => '5', '۶' => '6', '۷' => '7', '۸' => '8', '۹' => '9',
-        ]);
+        $ascii = DigitNormalizer::toAscii($input);
 
         // 2. Strip everything but digits (also drops '+', spaces, dashes).
         $raw = preg_replace('/\D+/', '', $ascii) ?? '';

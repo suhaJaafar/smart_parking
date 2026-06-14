@@ -5,6 +5,7 @@ namespace App\Bots\Flows;
 use App\Bots\Contracts\BotNotifier;
 use App\Bots\Contracts\BotSession;
 use App\Bots\Dto\OutboundReply;
+use App\Bots\Support\DigitNormalizer;
 use App\Bots\Support\Prompt;
 use App\Models\Park;
 use App\Models\Reserve;
@@ -139,7 +140,7 @@ class NearbyParksFlow
 
     private function reserve(BotSession $session, string $message): OutboundReply
     {
-        $msg = trim($message);
+        $msg = trim(DigitNormalizer::toAscii($message));
         if (!ctype_digit($msg)) {
             return OutboundReply::text(Prompt::ask("⚠️ أرسل رقم الموقف فقط (مثال: 1)."));
         }

@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Data\LocationData;
+use App\Data\ParkData;
 use App\Enums\RoleTypes;
 use App\Models\Park;
 use App\Models\Role;
@@ -28,26 +30,26 @@ class ParkService
     /**
      * Create a park and its location in one transaction.
      *
-     * @param  array  $locationData  Validated payload for Location (lat/lng/country/state/...)
-     * @param  array  $parkData      Validated payload for Park (name/capacity/free_spaces/...)
-     * @param  User   $owner         The authenticated user that will own this park.
+     * @param  LocationData  $location  Validated location payload (lat/lng/country/state/...).
+     * @param  ParkData      $park      Validated park payload (name/capacity/free_spaces).
+     * @param  User          $owner     The user that will own this park.
      */
-    public function createWithLocation(array $locationData, array $parkData, User $owner): Park
+    public function createWithLocation(LocationData $location, ParkData $park, User $owner): Park
     {
-        return DB::transaction(function () use ($locationData, $parkData, $owner) {
-            $location = $this->locationsInterface->create($locationData);
+        return DB::transaction(function () use ($location, $park, $owner) {
+            $locationRow = $this->locationsInterface->create($location->toArray());
 
-            $park = $this->parksInterface->create([
-                ...$parkData,
+            $parkRow = $this->parksInterface->create([
+                ...$park->toArray(),
                 'user_id'     => $owner->id,
-                'location_id' => $location->id,
+                'location_id' => $locationRow->id,
             ]);
 
-            // add space owner role to the user that created this park.
+            // Promote the creator to SPACE_OWNER (idempotent).
             $role = Role::firstOrCreate(['role' => RoleTypes::SPACE_OWNER->value]);
             $owner->roles()->syncWithoutDetaching([$role->id]);
 
-            return $park;
+            return $parkRow;
         });
     }
 }

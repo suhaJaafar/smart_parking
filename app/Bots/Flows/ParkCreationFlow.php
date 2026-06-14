@@ -4,7 +4,10 @@ namespace App\Bots\Flows;
 
 use App\Bots\Contracts\BotSession;
 use App\Bots\Dto\OutboundReply;
+use App\Bots\Support\DigitNormalizer;
 use App\Bots\Support\Prompt;
+use App\Data\LocationData;
+use App\Data\ParkData;
 use App\Enums\CountryTypes;
 use App\Enums\RoleTypes;
 use App\Enums\StateTypes;
@@ -95,7 +98,7 @@ class ParkCreationFlow
 
     private function askLocation(BotSession $session, string $message): OutboundReply
     {
-        $msg = trim($message);
+        $msg = trim(DigitNormalizer::toAscii($message));
         if (!ctype_digit($msg) || (int) $msg < 1) {
             return OutboundReply::text(Prompt::ask("⚠️ أرسل رقماً صحيحاً موجباً للسعة."));
         }
@@ -122,20 +125,19 @@ class ParkCreationFlow
 
         try {
             $park = $this->parkService->createWithLocation(
-                locationData: [
-                    'country'       => CountryTypes::IRAQ->value,
-                    'state'         => StateTypes::BAGHDAD->value,
-                    'city'          => $city,
-                    'postal_code'   => null,
-                    'latitude'      => $lat,
-                    'longitude'     => $lng,
-                    'extra_details' => 'Created via ' . $session->getChannel(),
-                ],
-                parkData: [
-                    'name'        => $data['name'],
-                    'capacity'    => $data['capacity'],
-                    'free_spaces' => $data['free_spaces'],
-                ],
+                location: new LocationData(
+                    country:      CountryTypes::IRAQ,
+                    state:        StateTypes::BAGHDAD,
+                    city:         $city,
+                    postalCode:   null,
+                    latitude:     $lat,
+                    longitude:    $lng,
+                    extraDetails: 'Created via ' . $session->getChannel(),
+                ),
+                park: new ParkData(
+                    name:     $data['name'],
+                    capacity: $data['capacity'],
+                ),
                 owner: $session->getUser(),
             );
         } catch (Throwable $e) {
@@ -175,7 +177,8 @@ class ParkCreationFlow
      */
     private function parseCoords(string $message): array
     {
-        $parts = array_map('trim', explode(',', $message));
+        // Accept Arabic/Persian digits typed for lat,lng too.
+        $parts = array_map('trim', explode(',', DigitNormalizer::toAscii($message)));
         if (count($parts) !== 2 || !is_numeric($parts[0]) || !is_numeric($parts[1])) {
             return [null, null];
         }

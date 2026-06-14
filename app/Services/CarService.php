@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Data\CarPlate;
 use App\Models\Car;
 use App\Models\Park;
 use App\Models\User;
@@ -36,20 +37,19 @@ class CarService
     }
 
     /**
-     * Find a car by its plate (prefix + number), or create it for the given owner
-     * if it doesn't exist yet. Used by the WhatsApp bot to make the SPACE_OWNER's
-     * job a one-step flow.
+     * Find a car by its plate, or create it for the given owner if it
+     * doesn't exist yet. Used by the bot to make the SPACE_OWNER's
+     * car-entry flow a one-step operation.
      */
     public function findOrCreateByPlate(
-        string $platePrefix,
-        string $carNumber,
+        CarPlate $plate,
         User $owner,
         ?string $model = null,
     ): Car {
         return Car::firstOrCreate(
             [
-                'plate_prefix' => $platePrefix,
-                'car_number'   => $carNumber,
+                'plate_prefix' => $plate->prefix,
+                'car_number'   => $plate->number,
             ],
             [
                 'user_id' => $owner->id,

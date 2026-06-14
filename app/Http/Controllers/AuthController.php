@@ -7,16 +7,19 @@ use App\Http\Requests\LoginRequest;
 use App\Http\Requests\RegisterRequest;
 use App\Http\Requests\WhatsAppRequestCodeRequest;
 use App\Http\Requests\WhatsAppVerifyCodeRequest;
+use App\Http\Requests\TelegramVerifyCodeRequest;
 use App\Http\Resources\RegisterResource;
 use App\Models\Role;
 use App\Models\User;
+use App\Bots\Channels\Telegram\TelegramLoginService;
 use App\Bots\Channels\WhatsApp\WhatsAppNotifier;
 use App\Bots\Channels\WhatsApp\WhatsAppOtpService;
 use Illuminate\Support\Facades\Hash;
 use Tymon\JWTAuth\Facades\JWTAuth;
 
 
-//  source code for login/register methods are from : "https://medium.com/@rokisheik/jwt-authentication-in-laravel-03dd9be4a21a"
+//  source code for login/register methods are from :
+//  "https://medium.com/@rokisheik/jwt-authentication-in-laravel-03dd9be4a21a"
 
 class AuthController extends Controller
 {
@@ -130,6 +133,40 @@ class AuthController extends Controller
         $code  = (string) $request->input('code');
 
         $user = $otp->verify($phone, $code);
+
+        if (!$user) {
+            return response()->json(['error' => 'Invalid or expired code.'], 401);
+        }
+
+        $token = JWTAuth::fromUser($user);
+
+        return response()->json([
+            'message' => 'Login successful',
+            'token'   => $token,
+            'user'    => new RegisterResource($user->load('roles')),
+        ]);
+    }
+
+    /**
+     * Telegram login — exchange a bot-issued one-time code for a JWT.
+     *
+     * Telegram accounts have no phone number, so (unlike the WhatsApp flow)
+     * the code is issued *inside* the bot — the owner taps "login to
+     * dashboard" — and the dashboard only verifies it here. The code maps
+     * back to the issuing chat_id server-side; the dashboard never sees it.
+     *
+     * Only SPACE_OWNER / SUPER_ADMIN accounts may sign in. The error is
+     * deliberately generic so it never reveals whether a code was valid,
+     * already used, or belonged to an ineligible account.
+     */
+    public function verifyTelegramCode(
+        TelegramVerifyCodeRequest $request,
+        TelegramLoginService $login,
+    ) {
+        $code   = (string) $request->input('code');
+        $chatId = $login->consume($code);
+
+        $user = $chatId ? $login->resolveOwner($chatId) : null;
 
         if (!$user) {
             return response()->json(['error' => 'Invalid or expired code.'], 401);
