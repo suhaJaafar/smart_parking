@@ -119,14 +119,15 @@ class CarEntryFlow
 
     private function finish(BotSession $session, string $message): OutboundReply
     {
-        $digits = preg_replace('/\D/', '', trim($message));
-        if ($digits === '' || strlen($digits) < 6) {
+        [$raw, $normalized] = $this->parseIdentifier($message);
+
+        if ($raw === null) {
             return OutboundReply::text(
                 Prompt::ask("⚠️ معرّف غير صحيح. أرسل رقم هاتف أو Telegram ID صالحاً.")
             );
         }
 
-        $carOwner = $this->resolveDriver($digits);
+        $carOwner = $this->resolveDriver($raw, $normalized);
 
         if (!$carOwner) {
             $session->reset();
@@ -263,21 +264,75 @@ class CarEntryFlow
     }
 
     /**
-     * Find the driver by either a phone number or a Telegram chat_id.
+     * Normalize a free-form identifier into two digit strings:
+     *  - $raw:        digits as the user typed them (just Arabic/Persian
+     *                 → ASCII, then non-digits stripped). Preserved so a
+     *                 Telegram chat_id like "7804684895" still matches
+     *                 the `telegram_chat_id` column even though it also
+     *                 happens to look like an Iraqi mobile shape.
+     *  - $normalized: Iraqi phone numbers reshaped to E.164-without-'+'
+     *                 ("9647XXXXXXXXX"). Everything else is returned
+     *                 unchanged.
      *
-     * Both columns are UNIQUE across the users table, so order doesn't
-     * matter for correctness — phone is tried first because most existing
-     * users (WhatsApp installed base) are keyed by phone.
+     * Accepted phone shapes (all map to "9647775270135"):
+     *   "+964 777 527 0135", "00964 777 527 0135", "964-777-527-0135",
+     *   "07775270135", "0777 527 0135", "7775270135",
+     *   "٠٧٧٧٥٢٧٠١٣٥" (Arabic-Indic), "۰۷۷۷۵۲۷۰۱۳۵" (Persian).
      *
-     * The leading-zero variant covers operators who store local numbers
-     * with a leading 0 (e.g. "07701234567") while the driver registered
-     * the international form ("9647701234567").
+     * Returns [null, null] when input is too short to be usable.
+     *
+     * @return array{0: ?string, 1: ?string}
      */
-    private function resolveDriver(string $digits): ?User
+    private function parseIdentifier(string $input): array
     {
-        return User::where('phone_number', $digits)
-            ->orWhere('phone_number', ltrim($digits, '0'))
-            ->orWhere('telegram_chat_id', $digits)
+        // 1. Translate Arabic-Indic (٠-٩) and Persian (۰-۹) digits → ASCII.
+        //    MUST happen before \D stripping or the Arabic digits get
+        //    treated as non-digits and dropped.
+        $ascii = strtr($input, [
+            '٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4',
+            '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9',
+            '۰' => '0', '۱' => '1', '۲' => '2', '۳' => '3', '۴' => '4',
+            '۵' => '5', '۶' => '6', '۷' => '7', '۸' => '8', '۹' => '9',
+        ]);
+
+        // 2. Strip everything but digits (also drops '+', spaces, dashes).
+        $raw = preg_replace('/\D+/', '', $ascii) ?? '';
+
+        if (strlen($raw) < 6) {
+            return [null, null];
+        }
+
+        // 3. Reshape known Iraqi mobile prefixes → "964XXXXXXXXXX".
+        $normalized = match (true) {
+            str_starts_with($raw, '00964')                          => substr($raw, 2),
+            str_starts_with($raw, '964')                            => $raw,
+            str_starts_with($raw, '0') && strlen($raw) === 11       => '964' . substr($raw, 1),
+            strlen($raw) === 10 && str_starts_with($raw, '7')       => '964' . $raw,
+            default                                                  => $raw,
+        };
+
+        return [$raw, $normalized];
+    }
+
+    /**
+     * Find the driver by either a phone number (in any common shape) or
+     * a Telegram chat_id.
+     *
+     * Tries the normalized phone form first (international without '+',
+     * matching how WhatsApp stores `wa_id`), then the raw input as-is,
+     * then a leading-zero-stripped variant, and finally the Telegram
+     * chat_id column. Both columns are UNIQUE so we get at most one row.
+     */
+    private function resolveDriver(string $raw, string $normalized): ?User
+    {
+        return User::query()
+            ->where(function ($q) use ($raw, $normalized) {
+                $q->where('phone_number', $normalized)
+                  ->orWhere('phone_number', $raw)
+                  ->orWhere('phone_number', ltrim($raw, '0'))
+                  ->orWhere('telegram_chat_id', $raw)
+                  ->orWhere('telegram_chat_id', $normalized);
+            })
             ->first();
     }
 }
