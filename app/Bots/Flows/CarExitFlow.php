@@ -5,6 +5,7 @@ namespace App\Bots\Flows;
 use App\Bots\Contracts\BotSession;
 use App\Bots\Dto\OutboundReply;
 use App\Bots\Support\Prompt;
+use App\Data\CarPlate;
 use App\Enums\RoleTypes;
 use App\Models\Car;
 use App\Models\Park;
@@ -80,8 +81,10 @@ class CarExitFlow
 
     private function finish(BotSession $session, string $message): OutboundReply
     {
-        $message = mb_strtoupper(trim($message));
-        if (!preg_match('/^([A-Z]{1,8})[\s\-]+([0-9]{1,20})$/u', $message, $m)) {
+        // Delegate plate parsing (incl. Arabic-digit normalization and
+        // optional separator) to the shared value object.
+        $plate = CarPlate::fromString($message);
+        if ($plate === null) {
             return OutboundReply::text(
                 Prompt::ask("⚠️ صيغة اللوحة غير صحيحة. مثال: BG-12345")
             );
@@ -90,8 +93,8 @@ class CarExitFlow
         $data    = $session->getData();
         $parkId  = $data['park_id'] ?? null;
 
-        $car = Car::where('plate_prefix', $m[1])
-            ->where('car_number', $m[2])
+        $car = Car::where('plate_prefix', $plate->prefix)
+            ->where('car_number', $plate->number)
             ->first();
 
         if (!$car) {
@@ -128,7 +131,7 @@ class CarExitFlow
 
         return OutboundReply::text(
             "✅ تم إخراج السيارة!\n"
-            . "اللوحة: {$m[1]}-{$m[2]}\n"
+            . "اللوحة: {$plate}\n"
             . "الأماكن الفارغة: " . ($park?->free_spaces ?? '?')
         );
     }

@@ -2,6 +2,8 @@
 
 namespace App\Http\Requests;
 
+use App\Data\LocationData;
+use App\Data\ParkData;
 use App\Enums\CountryTypes;
 use App\Enums\RoleTypes;
 use App\Enums\StateTypes;
@@ -76,26 +78,25 @@ class StoreParkRequest extends FormRequest
     }
 
     /**
-     * Subset of validated input destined for the locations table.
+     * Validated location payload, ready to hand to ParkService.
      */
-    public function locationData(): array
+    public function locationData(): LocationData
     {
-        return $this->safe()->only([
+        return LocationData::fromArray($this->safe()->only([
             'country', 'state', 'city', 'postal_code',
             'latitude', 'longitude', 'extra_details',
-        ]);
+        ]));
     }
 
     /**
-     * Subset of validated input destined for the parks table.
+     * Validated park payload, ready to hand to ParkService.
      * `free_spaces` defaults to `capacity` if the client didn't supply it.
      */
-    public function parkData(): array
+    public function parkData(): ParkData
     {
-        $data = $this->safe()->only(['name', 'capacity', 'free_spaces']);
-        $data['free_spaces'] ??= $data['capacity'];
-
-        return $data;
+        return ParkData::fromArray($this->safe()->only([
+            'name', 'capacity', 'free_spaces',
+        ]));
     }
 
     /**

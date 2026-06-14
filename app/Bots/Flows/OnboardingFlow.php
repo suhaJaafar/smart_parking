@@ -4,6 +4,7 @@ namespace App\Bots\Flows;
 
 use App\Bots\Contracts\BotSession;
 use App\Bots\Dto\OutboundReply;
+use App\Bots\Support\DigitNormalizer;
 use App\Bots\Support\MenuRenderer;
 use App\Enums\RoleTypes;
 use App\Models\Role;
@@ -75,7 +76,8 @@ class OnboardingFlow
 
     private function handleRole(BotSession $session, string $message): OutboundReply
     {
-        $msg = trim($message);
+        // Accept "١"/"٢" (Arabic) and "۱"/"۲" (Persian) too.
+        $msg = trim(DigitNormalizer::toAscii($message));
 
         if ($msg !== '1' && $msg !== '2') {
             return OutboundReply::text("⚠️ الرجاء إرسال 1 أو 2.");

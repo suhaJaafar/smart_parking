@@ -57,9 +57,9 @@ class ParkController extends Controller
             : $request->user();
 
         $park = $this->parkService->createWithLocation(
-            locationData: $request->locationData(),
-            parkData:     $request->parkData(),
-            owner:        $owner,
+            location: $request->locationData(),
+            park:     $request->parkData(),
+            owner:    $owner,
         );
 
         return (new ParkResource($park->load(['location', 'owner:id,name,email'])))

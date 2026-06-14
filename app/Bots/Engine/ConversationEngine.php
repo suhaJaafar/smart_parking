@@ -2,6 +2,7 @@
 
 namespace App\Bots\Engine;
 
+use App\Bots\Channels\Telegram\TelegramLoginService;
 use App\Bots\Contracts\BotSession;
 use App\Bots\Dto\OutboundReply;
 use App\Bots\Flows\CarEntryFlow;
@@ -9,6 +10,7 @@ use App\Bots\Flows\CarExitFlow;
 use App\Bots\Flows\NearbyParksFlow;
 use App\Bots\Flows\OnboardingFlow;
 use App\Bots\Flows\ParkCreationFlow;
+use App\Bots\Support\DigitNormalizer;
 use App\Bots\Support\MenuRenderer;
 use App\Enums\RoleTypes;
 use App\Models\Park;
@@ -70,6 +72,12 @@ class ConversationEngine
         'status', 'الحالة', 'حسابي', 'my status', 'profile',
     ];
 
+    /** Owner asks for a one-time code to sign in to the web dashboard. */
+    private const DASHBOARD_LOGIN_COMMANDS = [
+        'login', 'log in', 'dashboard', 'web', 'signin', 'sign in',
+        'تسجيل الدخول', 'دخول', 'اللوحة', 'لوحة التحكم',
+    ];
+
     public function __construct(
         private readonly OnboardingFlow $onboardingFlow,
         private readonly CarEntryFlow $carEntryFlow,
@@ -89,6 +97,13 @@ class ConversationEngine
     public function handle(BotSession $session, string $text, string $type): OutboundReply
     {
         $msg = trim($text);
+
+        /*
+         * Add ability to usr to send numbers in arabic/english ...
+         */
+        if ($type === self::TYPE_TEXT) {
+            $msg = DigitNormalizer::toAscii($msg);
+        }
 
         // Telegram users naturally type slash commands ("/start", "/help").
         // Strip a single leading "/" so they map onto the same vocabulary
@@ -146,6 +161,10 @@ class ConversationEngine
 
             if (in_array($lower, self::STATUS_COMMANDS, true)) {
                 return OutboundReply::text($this->userStatus($session));
+            }
+
+            if (in_array($lower, self::DASHBOARD_LOGIN_COMMANDS, true)) {
+                return $this->issueDashboardLoginCode($session);
             }
 
             if (in_array($lower, self::CANCEL_RESERVATION_COMMANDS, true)) {
@@ -335,6 +354,52 @@ class ConversationEngine
     // HELP / STATUS / RENAME / CANCEL / MY PARKS
     // =====================================================================
 
+    /**
+     * Issue a one-time code the owner types into the web dashboard to sign
+     * in. Telegram accounts have no phone number, so the code is delivered
+     * right here in the chat. Gated to the Telegram channel and to
+     * dashboard-eligible roles (SPACE_OWNER / SUPER_ADMIN).
+     */
+    private function issueDashboardLoginCode(BotSession $session): OutboundReply
+    {
+        if ($session->getChannel() !== 'telegram') {
+            return OutboundReply::text(
+                "تسجيل الدخول إلى اللوحة عبر هذه الخطوة متاح لمستخدمي تيليجرام فقط."
+            );
+        }
+
+        $user  = $session->getUser();
+        $roles = $user->roles->pluck('role')->all();
+        $eligible = in_array(RoleTypes::SPACE_OWNER, $roles, true)
+                 || in_array(RoleTypes::SUPER_ADMIN, $roles, true);
+
+        if (!$eligible) {
+            return OutboundReply::text(
+                "🔒 لوحة التحكم مخصّصة لأصحاب المواقف.\n"
+                . "أرسل *تسجيل* لتفعيل وضع مالك الموقف أولاً."
+            );
+        }
+
+        $login  = app(TelegramLoginService::class);
+        $chatId = $session->getRecipient();
+
+        if ($login->isOnCooldown($chatId)) {
+            return OutboundReply::text(
+                "⏳ لقد طلبت رمزاً للتو. انتظر دقيقة ثم حاول مرة أخرى."
+            );
+        }
+
+        $code = $login->issue($chatId);
+        $ttl  = (int) (TelegramLoginService::TTL_SECONDS / 60);
+
+        return OutboundReply::text(
+            "🔐 *رمز الدخول إلى لوحة ParkIQ:*\n\n"
+            . "`{$code}`\n\n"
+            . "أدخل هذا الرمز في صفحة \"تسجيل الدخول عبر تيليجرام\" على لوحة التحكم.\n"
+            . "صالح لمدة {$ttl} دقائق. لا تشاركه مع أحد."
+        );
+    }
+
     private function helpSheet(BotSession $session): string
     {
         $user       = $session->getUser();
@@ -357,6 +422,7 @@ class ConversationEngine
             $lines[] = "   *2*  خروج سيارة من الكراج";
             $lines[] = "   *3*  إنشاء موقف جديد";
             $lines[] = "   *موقفي*  عرض مواقفي المسجلة";
+            $lines[] = "   *تسجيل الدخول*  رمز الدخول إلى لوحة التحكم على الويب";
             $lines[] = '';
         }
 
