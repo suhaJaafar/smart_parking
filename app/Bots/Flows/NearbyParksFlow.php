@@ -9,7 +9,6 @@ use App\Bots\Support\DigitNormalizer;
 use App\Bots\Support\Prompt;
 use App\Models\Park;
 use App\Models\Reserve;
-use App\Models\User;
 use App\Repositories\Contracts\ParkRepositoryInterface;
 use App\Services\ReservationService;
 use Illuminate\Support\Collection;
@@ -45,7 +44,7 @@ class NearbyParksFlow
             $session->reset();
         }
 
-        if (in_array(mb_strtolower(trim($message)), ['cancel', 'الغاء', 'إلغاء'], true)) {
+        if (in_array(mb_strtolower(trim($message)), ['0', 'cancel', 'الغاء', 'إلغاء'], true)) {
             $session->reset();
             return OutboundReply::text("تم إلغاء العملية.");
         }
@@ -123,7 +122,7 @@ class NearbyParksFlow
         }
 
         $lines[] = "أرسل رقم الموقف للحجز (مثال: 1)";
-        $lines[] = "أو أرسل 'cancel' للإلغاء.";
+        $lines[] = "أو أرسل *0* للإلغاء.";
 
         $session->update([
             'step'       => 'choose_park',
@@ -179,16 +178,15 @@ class NearbyParksFlow
         $expires = $reserve->expires_at->setTimezone(config('app.timezone'))->format('H:i');
         $mapsUrl = sprintf('https://www.google.com/maps?q=%F,%F', $choice['lat'], $choice['lng']);
 
-        // Show the customer the exact identifier the owner will ask for
-        // at the gate. Telegram drivers don't have a phone, so we surface
-        // their chat_id instead — it's what the owner enters in CarEntry.
-        $identifierLine = $this->buildCustomerIdentifierLine($session->getUser());
+        // Show the customer the booking code they need to give the owner.
+        $keyLine = "🔑 *booking code:* `{$reserve->booking_code}`\n"
+                 . "_اعطِ هذا الرمز لصاحب الموقف عند وصولك._\n\n";
 
         return OutboundReply::text(
             "✅ تم حجز مكان لك في *{$choice['name']}*\n\n"
             . "🗺️ الاتجاهات: {$mapsUrl}\n"
             . "⏰ صالح حتّى الساعة {$expires}\n\n"
-            . $identifierLine
+            . $keyLine
             . "إذا لم تصل قبل ذلك سيتم إلغاء الحجز تلقائياً."
         );
     }
@@ -208,7 +206,6 @@ class NearbyParksFlow
 
             $customer      = $reserve->user ?? $reserve->user;
             $customerName  = $customer?->name ?: 'سائق';
-            $customerLine  = $this->describeIdentifierForOwner($customer);
 
             $expires = $reserve->expires_at
                 ? $reserve->expires_at->setTimezone(config('app.timezone'))->format('H:i')
@@ -217,7 +214,7 @@ class NearbyParksFlow
             $message = "🔔 *حجز جديد في موقفك*\n\n"
                      . "الموقف: *{$park->name}*\n"
                      . "الزبون: *{$customerName}*\n"
-                     . "{$customerLine}\n"
+                     . "booking code: *`{$reserve->booking_code}`*\n"
                      . "صالح حتّى الساعة: {$expires}\n"
                      . "الأماكن المتبقية: *{$park->free_spaces}*\n\n"
                      . "_سيتم إلغاء الحجز تلقائياً إذا لم يصل الزبون في الوقت المحدد._";
@@ -237,53 +234,6 @@ class NearbyParksFlow
         return $meters >= 1000
             ? number_format($meters / 1000, 1) . ' كم'
             : "{$meters} م";
-    }
-
-    /**
-     * Build the "give this to the owner at the gate" hint shown to the
-     * customer right after a successful reservation. Telegram drivers
-     * have no phone, so we surface their chat_id — it's what the owner
-     * types into CarEntry's `identifier` step.
-     */
-    private function buildCustomerIdentifierLine(?User $customer): string
-    {
-        if (!$customer) {
-            return '"لم يتم تحديد رقم تواصلك مع الموقف. تأكد من تسجيل رقم هاتفك في إعدادات الحساب أو ربط حسابك بتليجرام."';
-        }
-
-        if ($customer->phone_number) {
-            return "🔑 *رقمك لدى الموقف:* `{$customer->phone_number}`\n"
-                . "_اعطِ هذا الرقم لصاحب الموقف عند وصولك._\n\n";
-        }
-
-        if ($customer->telegram_chat_id) {
-            return "🔑 *معرّفك لدى الموقف (Telegram ID):* `{$customer->telegram_chat_id}`\n"
-                . "_اعطِ هذا الرقم لصاحب الموقف عند وصولك._\n\n";
-        }
-
-        return '';
-    }
-
-    /**
-     * Format the customer's identifier for the owner's new-reservation
-     * notification. Phone takes precedence when both exist (extremely
-     * rare — only if the same person linked both channels).
-     */
-    private function describeIdentifierForOwner(?User $customer): string
-    {
-        if (!$customer) {
-            return "رقم التواصل: —";
-        }
-
-        if ($customer->phone_number) {
-            return "رقم التواصل: `+" . ltrim($customer->phone_number, '+') . "`";
-        }
-
-        if ($customer->telegram_chat_id) {
-            return "معرّف تيليجرام: `{$customer->telegram_chat_id}`";
-        }
-
-        return "رقم التواصل: —";
     }
 
     /**

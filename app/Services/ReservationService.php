@@ -61,6 +61,7 @@ class ReservationService
                 'user_id'    => $user->id,
                 'park_id'    => $locked->id,
                 'status'     => Reserve::STATUS_START,
+                'booking_code' => Reserve::generateBookingCodeForPark($locked->id),
                 'expires_at' => now()->addMinutes(self::HOLD_MINUTES),
             ]);
         });
@@ -231,5 +232,21 @@ class ReservationService
         }
 
         return $count;
+    }
+
+    /**
+     * Find the pending reservation by booking code within a specific park.
+     *
+     * Scope to START only so the same code cannot be reused to re-enter
+     * an already-activated reservation.
+     */
+    public function findPendingByBookingCode(Park $park, string $bookingCode): ?Reserve
+    {
+        return Reserve::where('park_id', $park->id)
+            ->where('booking_code', $bookingCode)
+            ->where('status', Reserve::STATUS_START)
+            ->with('user')
+            ->latest('created_at')
+            ->first();
     }
 }

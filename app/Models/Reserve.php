@@ -22,6 +22,7 @@ class Reserve extends Model
         'park_id',
         'status',
         'expires_at',
+        'booking_code',
     ];
 
     protected function casts(): array
@@ -48,5 +49,23 @@ class Reserve extends Model
     public function payments(): HasMany
     {
         return $this->hasMany(Payment::class, 'reserve_id');
+    }
+
+    /**
+     * Generate a short numeric booking code for a specific park.
+     *
+     * Uniqueness scope is ACTIVE reservation lifecycle (START/ACTIVE)
+     * within the same park, which keeps the code customer-friendly.
+     */
+    public static function generateBookingCodeForPark(string $parkId): string
+    {
+        do {
+            $code = (string) random_int(1000, 9999);
+        } while (self::where('park_id', $parkId)
+            ->where('booking_code', $code)
+            ->whereIn('status', [self::STATUS_START, self::STATUS_ACTIVE])
+            ->exists());
+
+        return $code;
     }
 }

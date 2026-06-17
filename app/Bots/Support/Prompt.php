@@ -18,7 +18,7 @@ final class Prompt
      * Telegram truncate long messages in some clients and we want the
      * hint to stay visible.
      */
-    public const HINT = "\n\n💡 أرسل *رجوع* للقائمة الرئيسية • *الغاء* للخروج";
+    public const HINT = "\n\n💡 أرسل *00* للقائمة الرئيسية • *0* للإلغاء والخروج";
 
     /**
      * Wrap a prompt body with the standard escape-hint footer.

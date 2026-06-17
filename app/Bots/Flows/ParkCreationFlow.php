@@ -40,7 +40,7 @@ class ParkCreationFlow
             $session->reset();
         }
 
-        if (in_array(mb_strtolower(trim($message)), ['cancel', 'الغاء', 'إلغاء'], true)) {
+        if (in_array(mb_strtolower(trim($message)), ['0', 'cancel', 'الغاء', 'إلغاء'], true)) {
             $session->reset();
             return OutboundReply::text("تم إلغاء العملية.");
         }
