@@ -22,16 +22,13 @@ use Throwable;
 /**
  * Two-step flow for a SPACE_OWNER to bring a car INTO their park.
  *
- * Steps: plate → identifier → done.
- *   • plate       -> "BG-12345" (prefix-number)
- *   • identifier  -> phone number (WhatsApp drivers) OR Telegram chat_id
- *                    (Telegram drivers). The flow auto-detects which
- *                    column to query — drivers never have both.
+ * Steps: plate → booking_code → done.
+ *   • plate         -> "BG-12345" (prefix-number)
+ *   • booking_code  -> short code given by customer
  *
  * If the car doesn't exist yet, it's created (find-or-create by plate).
- * The car is then linked to the SPACE_OWNER's park and free_spaces is
- * decremented (unless the customer pre-reserved, in which case the slot
- * was already debited at reservation time).
+ * The car is then linked to the SPACE_OWNER's park and the matching
+ * pending reservation is marked active.
  */
 class CarEntryFlow
 {
@@ -50,7 +47,7 @@ class CarEntryFlow
             $session->reset();
         }
 
-        if (in_array(mb_strtolower(trim($message)), ['cancel', 'الغاء', 'إلغاء'], true)) {
+        if (in_array(mb_strtolower(trim($message)), ['0', 'cancel', 'الغاء', 'إلغاء'], true)) {
             $session->reset();
             return OutboundReply::text("تم إلغاء العملية.");
         }
@@ -60,9 +57,9 @@ class CarEntryFlow
         }
 
         return match ($session->getStep()) {
-            'plate'      => $this->askIdentifier($session, $message),
-            'identifier' => $this->finish($session, $message),
-            default      => OutboundReply::empty(),
+            'plate'        => $this->askBookingCode($session, $message),
+            'booking_code' => $this->finish($session, $message),
+            default        => OutboundReply::empty(),
         };
     }
 
@@ -95,7 +92,7 @@ class CarEntryFlow
         );
     }
 
-    private function askIdentifier(BotSession $session, string $message): OutboundReply
+    private function askBookingCode(BotSession $session, string $message): OutboundReply
     {
         $plate = CarPlate::fromString($message);
         if ($plate === null) {
@@ -107,34 +104,22 @@ class CarEntryFlow
         $this->merge($session, [
             'plate_prefix' => $plate->prefix,
             'car_number'   => $plate->number,
-        ], 'identifier');
+        ], 'booking_code');
 
         return OutboundReply::text(
             Prompt::ask(
-                "📱 أرسل *معرّف* صاحب السيارة:\n"
-                . "• رقم الهاتف (واتساب) — مثال: `9647701234567`\n"
-                . "• أو رقم تيليجرام (Telegram ID) — مثال: `7804684895`\n\n"
-                . "_يحصل الزبون على معرّفه من بوت تيليجرام بإرسال *الحالة*._"
+                "🔑 أرسل *booking code* الذي أعطاه لك الزبون:\n"
+                . "_مثال: 1234_"
             )
         );
     }
 
     private function finish(BotSession $session, string $message): OutboundReply
     {
-        [$raw, $normalized] = $this->parseIdentifier($message);
-
-        if ($raw === null) {
+        $bookingCode = trim(DigitNormalizer::toAscii($message));
+        if (!preg_match('/^\d{3,4}$/', $bookingCode)) {
             return OutboundReply::text(
-                Prompt::ask("⚠️ معرّف غير صحيح. أرسل رقم هاتف أو Telegram ID صالحاً.")
-            );
-        }
-
-        $carOwner = $this->resolveDriver($raw, $normalized);
-
-        if (!$carOwner) {
-            $session->reset();
-            return OutboundReply::text(
-                "❌ لا يوجد مستخدم بهذا المعرّف. اطلب من صاحب السيارة التسجيل في البوت أولاً."
+                Prompt::ask("⚠️ booking code غير صالح. أرسل 3 أو 4 أرقام فقط.")
             );
         }
 
@@ -146,6 +131,19 @@ class CarEntryFlow
             return OutboundReply::text("❌ تعذّر العثور على الموقف.");
         }
 
+        $reserve = $this->reservations->findPendingByBookingCode($park, $bookingCode);
+        if (!$reserve) {
+            return OutboundReply::text(
+                Prompt::ask("⚠️ booking code غير صالح لهذا الموقف أو منتهي الصلاحية.")
+            );
+        }
+
+        $carOwner = $reserve->user;
+        if (!$carOwner) {
+            $session->reset();
+            return OutboundReply::text("❌ لم يتم العثور على الزبون المرتبط بهذا الحجز.");
+        }
+
         try {
             $car = $this->carService->findOrCreateByPlate(
                 plate: new CarPlate(
@@ -155,22 +153,16 @@ class CarEntryFlow
                 owner: $carOwner,
             );
 
-            // If the customer pre-reserved this slot via the bot, the slot
-            // was already debited from free_spaces at reservation time.
-            // Accepting the hold (START → ACTIVE) means we must NOT
-            // decrement free_spaces a second time.
-            $heldReservation = $this->reservations->findPendingHold($carOwner, $park);
-
+            // The reservation already debited the space at reservation time,
+            // so we must not decrement free_spaces again.
             $car = $this->carService->enterPark(
                 $car,
                 $park->fresh(),
-                alreadyFull: $heldReservation !== null,
+                alreadyFull: true,
             );
 
-            $activeReservation = null;
-            if ($heldReservation !== null) {
-                $activeReservation = $this->reservations->markActive($carOwner, $park);
-            }
+            // Mark the reservation as ACTIVE
+            $activeReservation = $this->reservations->markActive($carOwner, $park);
         } catch (Throwable $e) {
             Log::error('Bot car enter failed', ['error' => $e->getMessage()]);
             $session->reset();
@@ -180,21 +172,16 @@ class CarEntryFlow
         $session->reset();
 
         // Notify the customer their car has been registered as parked.
-        // Best-effort — BotNotifier swallows its own errors.
         $this->notifyCustomer(
             $carOwner,
             $park,
             $car,
-            $heldReservation !== null,
+            true,
             $activeReservation,
         );
 
-        $arrivalNote = $heldReservation !== null
-            ? "✅ تم تأكيد وصول العميل! (الحجز مكتمل)\n"
-            : "✅ تم إدخال السيارة!\n";
-
         return OutboundReply::text(
-            $arrivalNote
+            "✅ تم تأكيد وصول العميل! (الحجز مكتمل)\n"
             . "اللوحة: {$car->plate_prefix}-{$car->car_number}\n"
             . "الموقف: {$park->name}\n"
             . "الأماكن الفارغة: {$park->fresh()->free_spaces}"
@@ -251,73 +238,5 @@ class CarEntryFlow
             'step'       => $nextStep,
             'expires_at' => now()->addMinutes(self::TTL_MINUTES),
         ]);
-    }
-
-    /**
-     * Normalize a free-form identifier into two digit strings:
-     *  - $raw:        digits as the user typed them (just Arabic/Persian
-     *                 → ASCII, then non-digits stripped). Preserved so a
-     *                 Telegram chat_id like "7804684895" still matches
-     *                 the `telegram_chat_id` column even though it also
-     *                 happens to look like an Iraqi mobile shape.
-     *  - $normalized: Iraqi phone numbers reshaped to E.164-without-'+'
-     *                 ("9647XXXXXXXXX"). Everything else is returned
-     *                 unchanged.
-     *
-     * Accepted phone shapes (all map to "9647775270135"):
-     *   "+964 777 527 0135", "00964 777 527 0135", "964-777-527-0135",
-     *   "07775270135", "0777 527 0135", "7775270135",
-     *   "٠٧٧٧٥٢٧٠١٣٥" (Arabic-Indic), "۰۷۷۷۵۲۷۰۱۳۵" (Persian).
-     *
-     * Returns [null, null] when input is too short to be usable.
-     *
-     * @return array{0: ?string, 1: ?string}
-     */
-    private function parseIdentifier(string $input): array
-    {
-        // 1. Translate Arabic-Indic (٠-٩) and Persian (۰-۹) digits → ASCII.
-        //    MUST happen before \D stripping or the Arabic digits get
-        //    treated as non-digits and dropped.
-        $ascii = DigitNormalizer::toAscii($input);
-
-        // 2. Strip everything but digits (also drops '+', spaces, dashes).
-        $raw = preg_replace('/\D+/', '', $ascii) ?? '';
-
-        if (strlen($raw) < 6) {
-            return [null, null];
-        }
-
-        // 3. Reshape known Iraqi mobile prefixes → "964XXXXXXXXXX".
-        $normalized = match (true) {
-            str_starts_with($raw, '00964')                          => substr($raw, 2),
-            str_starts_with($raw, '964')                            => $raw,
-            str_starts_with($raw, '0') && strlen($raw) === 11       => '964' . substr($raw, 1),
-            strlen($raw) === 10 && str_starts_with($raw, '7')       => '964' . $raw,
-            default                                                  => $raw,
-        };
-
-        return [$raw, $normalized];
-    }
-
-    /**
-     * Find the driver by either a phone number (in any common shape) or
-     * a Telegram chat_id.
-     *
-     * Tries the normalized phone form first (international without '+',
-     * matching how WhatsApp stores `wa_id`), then the raw input as-is,
-     * then a leading-zero-stripped variant, and finally the Telegram
-     * chat_id column. Both columns are UNIQUE so we get at most one row.
-     */
-    private function resolveDriver(string $raw, string $normalized): ?User
-    {
-        return User::query()
-            ->where(function ($q) use ($raw, $normalized) {
-                $q->where('phone_number', $normalized)
-                  ->orWhere('phone_number', $raw)
-                  ->orWhere('phone_number', ltrim($raw, '0'))
-                  ->orWhere('telegram_chat_id', $raw)
-                  ->orWhere('telegram_chat_id', $normalized);
-            })
-            ->first();
     }
 }

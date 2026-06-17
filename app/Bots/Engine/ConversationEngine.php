@@ -39,15 +39,15 @@ class ConversationEngine
 
     /** Cancel / back / restart — anything that should drop the user back to the menu. */
     private const ESCAPE_COMMANDS = [
-        'cancel', 'الغاء', 'إلغاء',
+        '0', 'cancel', 'الغاء', 'إلغاء',
         'menu', 'القائمة',
-        'back', 'رجوع',
+        '00', 'back', 'رجوع',
         'restart', 'اعادة', 'إعادة',
     ];
 
     /** Re-run onboarding (switch role). */
     private const RESTART_ONBOARDING_COMMANDS = [
-        'register', 'تسجيل', 'switch', 'تبديل', 'change role', 'تغيير الدور',
+        'register', 'تسجيل', 'switch', 'تبديل', 'change role', 'تغيير الدور', '7️⃣',
     ];
 
     /** Customer wants to release their currently held slot. */
@@ -144,7 +144,7 @@ class ConversationEngine
         // to bail out and begin fresh.
         // -------------------------------------------------------------
         $isFreshStart = in_array($lower, ['start', 'menu', 'القائمة', 'hello', 'hi', 'مرحبا', 'هلو'], true);
-        $isCancel     = in_array($lower, ['cancel', 'الغاء', 'إلغاء', 'back', 'رجوع'], true);
+        $isCancel     = in_array($lower, ['0', 'cancel', 'الغاء', 'إلغاء', '00', 'back', 'رجوع'], true);
 
         if (!$session->getUser() && ($isFreshStart || $isCancel)) {
             $session->reset();
@@ -234,7 +234,7 @@ class ConversationEngine
 
         $lower = mb_strtolower($msg);
 
-        if (in_array($lower, ['cancel', 'الغاء', 'إلغاء'], true)) {
+        if (in_array($lower, ['0', 'cancel', 'الغاء', 'إلغاء'], true)) {
             $session->reset();
             return OutboundReply::text(
                 "تم إلغاء العملية.\nأرسل *القائمة* للقائمة أو *مساعدة* للأوامر."
@@ -282,6 +282,21 @@ class ConversationEngine
 
         if (in_array($lower, ['hello', 'hi', 'مرحبا', 'هلو', 'menu', 'القائمة', 'start'], true)) {
             return OutboundReply::text($this->menu->for($user));
+        }
+
+        // Numeric shortcuts for the "useful commands" block of the menu.
+        // Only resolved at idle so they never shadow a flow's numeric input.
+        if ($lower === '5') {
+            return OutboundReply::text($this->helpSheet($session));
+        }
+
+        if ($lower === '6') {
+            return OutboundReply::text($this->userStatus($session));
+        }
+
+        if ($lower === '7') {
+            $session->reset();
+            return $this->startFlow($session->fresh(['user', 'user.roles']), OnboardingFlow::class);
         }
 
         return OutboundReply::text(
@@ -376,7 +391,7 @@ class ConversationEngine
         if (!$eligible) {
             return OutboundReply::text(
                 "🔒 لوحة التحكم مخصّصة لأصحاب المواقف.\n"
-                . "أرسل *تسجيل* لتفعيل وضع مالك الموقف أولاً."
+                . "أرسل 7️⃣ لتفعيل وضع مالك الموقف أولاً."
             );
         }
 
@@ -442,8 +457,8 @@ class ConversationEngine
         $lines[] = '';
 
         $lines[] = "🆘 *في أي وقت:*";
-        $lines[] = "   *الغاء*  أو *cancel*  — إلغاء العملية الحالية";
-        $lines[] = "   *رجوع*  أو *back*    — العودة للقائمة";
+        $lines[] = "   *0*  أو *الغاء*  — إلغاء العملية الحالية";
+        $lines[] = "   *00*  أو *رجوع*    — العودة للقائمة";
         $lines[] = "   *الحالة* أو *status*  — حسابي وحجزي الحالي";
         $lines[] = "   *مساعدة* أو *help*   — عرض هذا الدليل";
 
