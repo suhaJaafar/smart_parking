@@ -23,12 +23,14 @@ class Reserve extends Model
         'status',
         'expires_at',
         'booking_code',
+        'is_pre_booking',
     ];
 
     protected function casts(): array
     {
         return [
-            'expires_at' => 'datetime',
+            'expires_at'     => 'datetime',
+            'is_pre_booking' => 'boolean',
         ];
     }
 

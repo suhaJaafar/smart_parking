@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\PaymentStatusTypes;
 use App\Models\Park;
 use App\Models\Reserve;
 use App\Models\User;
@@ -16,6 +17,14 @@ class ReservationService
      * How long an unclaimed reservation holds a space before it auto-expires.
      */
     public const HOLD_MINUTES = 30;
+
+    /**
+     * Pre-bookings are made remotely (e.g. from home for a later arrival),
+     * so they get a much longer hold than an on-site reservation. Once the
+     * customer pays, {@see self::expireStale()} stops touching the row at
+     * all — a paid slot is never auto-released.
+     */
+    public const PRE_BOOKING_HOLD_MINUTES = 240;
 
     public function __construct(
         private readonly PaymentService $payments,
@@ -33,9 +42,9 @@ class ReservationService
      * @throws RuntimeException if the park is full or user already holds a
      *                          pending reservation at this park.
      */
-    public function reserve(User $user, Park $park): Reserve
+    public function reserve(User $user, Park $park, bool $preBooking = false): Reserve
     {
-        return DB::transaction(function () use ($user, $park) {
+        return DB::transaction(function () use ($user, $park, $preBooking) {
             // Lock the park row to serialize free_spaces decrement.
             $locked = Park::whereKey($park->id)->lockForUpdate()->firstOrFail();
 
@@ -57,12 +66,17 @@ class ReservationService
 
             $locked->decrement('free_spaces');
 
+            $holdMinutes = $preBooking
+                ? self::PRE_BOOKING_HOLD_MINUTES
+                : self::HOLD_MINUTES;
+
             return Reserve::create([
-                'user_id'    => $user->id,
-                'park_id'    => $locked->id,
-                'status'     => Reserve::STATUS_START,
-                'booking_code' => Reserve::generateBookingCodeForPark($locked->id),
-                'expires_at' => now()->addMinutes(self::HOLD_MINUTES),
+                'user_id'        => $user->id,
+                'park_id'        => $locked->id,
+                'status'         => Reserve::STATUS_START,
+                'booking_code'   => Reserve::generateBookingCodeForPark($locked->id),
+                'is_pre_booking' => $preBooking,
+                'expires_at'     => now()->addMinutes($holdMinutes),
             ]);
         });
     }
@@ -217,6 +231,16 @@ class ReservationService
                 }
 
                 if ($reserve->expires_at === null || $reserve->expires_at->isFuture()) {
+                    return;
+                }
+
+                // A paid pre-booking must never be auto-released: the
+                // customer already settled the bill for this slot.
+                $paid = $reserve->payments()
+                    ->where('status', PaymentStatusTypes::SUCCESS->value)
+                    ->exists();
+
+                if ($paid) {
                     return;
                 }
 

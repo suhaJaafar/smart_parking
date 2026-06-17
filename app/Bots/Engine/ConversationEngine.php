@@ -10,6 +10,7 @@ use App\Bots\Flows\CarExitFlow;
 use App\Bots\Flows\NearbyParksFlow;
 use App\Bots\Flows\OnboardingFlow;
 use App\Bots\Flows\ParkCreationFlow;
+use App\Bots\Flows\PreBookingFlow;
 use App\Bots\Support\DigitNormalizer;
 use App\Bots\Support\MenuRenderer;
 use App\Enums\RoleTypes;
@@ -47,7 +48,7 @@ class ConversationEngine
 
     /** Re-run onboarding (switch role). */
     private const RESTART_ONBOARDING_COMMANDS = [
-        'register', 'تسجيل', 'switch', 'تبديل', 'change role', 'تغيير الدور', '7️⃣',
+        'register', 'تسجيل', 'switch', 'تبديل', 'change role', 'تغيير الدور', '8️⃣',
     ];
 
     /** Customer wants to release their currently held slot. */
@@ -84,6 +85,7 @@ class ConversationEngine
         private readonly CarExitFlow $carExitFlow,
         private readonly NearbyParksFlow $nearbyParksFlow,
         private readonly ParkCreationFlow $parkFlow,
+        private readonly PreBookingFlow $preBookingFlow,
         private readonly MenuRenderer $menu,
         private readonly ReservationService $reservations,
     ) {}
@@ -207,6 +209,7 @@ class ConversationEngine
             CarEntryFlow::FLOW     => $this->carEntryFlow->handle($session, $msg),
             CarExitFlow::FLOW      => $this->carExitFlow->handle($session, $msg),
             NearbyParksFlow::FLOW  => $this->nearbyParksFlow->handle($session, $msg),
+            PreBookingFlow::FLOW   => $this->preBookingFlow->handle($session, $msg),
             ParkCreationFlow::FLOW => $this->parkFlow->handle($session, $msg),
             default                => null,
         };
@@ -274,6 +277,10 @@ class ConversationEngine
                 '4'         => NearbyParksFlow::class,
                 'nearby'    => NearbyParksFlow::class,
                 'find park' => NearbyParksFlow::class,
+                '5'             => PreBookingFlow::class,
+                'pre booking'   => PreBookingFlow::class,
+                'pre-booking'   => PreBookingFlow::class,
+                'حجز مسبق'      => PreBookingFlow::class,
             ];
             if (isset($customerMap[$lower])) {
                 return $this->startFlow($session, $customerMap[$lower]);
@@ -286,15 +293,15 @@ class ConversationEngine
 
         // Numeric shortcuts for the "useful commands" block of the menu.
         // Only resolved at idle so they never shadow a flow's numeric input.
-        if ($lower === '5') {
+        if ($lower === '6') {
             return OutboundReply::text($this->helpSheet($session));
         }
 
-        if ($lower === '6') {
+        if ($lower === '7') {
             return OutboundReply::text($this->userStatus($session));
         }
 
-        if ($lower === '7') {
+        if ($lower === '8') {
             $session->reset();
             return $this->startFlow($session->fresh(['user', 'user.roles']), OnboardingFlow::class);
         }
@@ -327,6 +334,7 @@ class ConversationEngine
             CarEntryFlow::class     => $this->carEntryFlow->handle($fresh, ''),
             CarExitFlow::class      => $this->carExitFlow->handle($fresh, ''),
             NearbyParksFlow::class  => $this->nearbyParksFlow->handle($fresh, ''),
+            PreBookingFlow::class   => $this->preBookingFlow->handle($fresh, ''),
             ParkCreationFlow::class => $this->parkFlow->handle($fresh, ''),
         };
     }
@@ -391,7 +399,7 @@ class ConversationEngine
         if (!$eligible) {
             return OutboundReply::text(
                 "🔒 لوحة التحكم مخصّصة لأصحاب المواقف.\n"
-                . "أرسل 7️⃣ لتفعيل وضع مالك الموقف أولاً."
+                . "أرسل 8️⃣ لتفعيل وضع مالك الموقف أولاً."
             );
         }
 
@@ -444,6 +452,7 @@ class ConversationEngine
         if ($isCustomer) {
             $lines[] = "🚗 *سائق:*";
             $lines[] = "   *4*  البحث عن أقرب موقف";
+            $lines[] = "   *5*  حجز موقف مسبق ودفع مسبق";
             $lines[] = "   *الغاء حجزي*  إلغاء الحجز الحالي";
             $lines[] = '';
         }
