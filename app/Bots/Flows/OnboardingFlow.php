@@ -18,9 +18,9 @@ use Illuminate\Support\Str;
  *
  * Flow:
  *   ask_role  → "Are you a (1) Driver / (2) Park Owner?"
- *   confirm   → "We'll create an account with <recipient>. Confirm? نعم/لا"
- *     • نعم → create User with the chosen role(s) → done.
- *     • لا  → abort.
+ *     • The account is then created automatically using the channel-native
+ *       identifier (phone for WhatsApp, chat_id for Telegram) — no
+ *       confirmation prompt.
  *
  * The user is never asked for their name — the channel-native identifier
  * (phone for WhatsApp, chat_id for Telegram) is the only thing we need.
@@ -51,7 +51,6 @@ class OnboardingFlow
 
         return match ($session->getStep()) {
             'ask_role' => $this->handleRole($session, $message),
-            'confirm'  => $this->handleConfirm($session, $message),
             default    => OutboundReply::empty(),
         };
     }
@@ -90,19 +89,9 @@ class OnboardingFlow
             return $this->grantRoleToExistingUser($session, $msg === '2');
         }
 
-        // Brand-new user — show a confirmation prompt before creating the account.
-        $session->update([
-            'step'       => 'confirm',
-            'data'       => ['role_choice' => $msg],
-            'expires_at' => now()->addMinutes(self::TTL_MINUTES),
-        ]);
-
-        return OutboundReply::text(
-            "لإنشاء حسابك سنستخدم {$this->channelLabel($session)}:\n"
-            . "*{$this->displayRecipient($session)}*\n\n"
-            . "هل توافق على إنشاء الحساب بهذه البيانات؟\n"
-            . "أرسل *نعم* للتأكيد أو *لا* للإلغاء."
-        );
+        // Brand-new user — create the account automatically using the
+        // channel-native identifier. No confirmation prompt.
+        return $this->createAccount($session, $msg === '2');
     }
 
     /**
@@ -136,39 +125,14 @@ class OnboardingFlow
         return OutboundReply::text($header . $this->menu->for($user));
     }
 
-    private function handleConfirm(BotSession $session, string $message): OutboundReply
-    {
-        $msg     = mb_strtolower(trim($message));
-        $confirm = ['نعم', 'yes', 'y', 'ok', 'موافق', 'موافقة'];
-        $deny    = ['لا', 'no', 'n', 'إلغاء'];
-
-        if (in_array($msg, $deny, true)) {
-            $session->reset();
-            return OutboundReply::text(
-                "تم إلغاء إنشاء الحساب.\nأرسل *هلو* للبدء من جديد."
-            );
-        }
-
-        if (!in_array($msg, $confirm, true)) {
-            return OutboundReply::text(
-                "⚠️ لم أفهم الإجابة.\n"
-                . "سيتم إنشاء حساب باستخدام *{$this->displayRecipient($session)}*.\n"
-                . "أرسل *نعم* للتأكيد أو *لا* للإلغاء."
-            );
-        }
-
-        return $this->createAccount($session);
-    }
-
     /**
      * Create the account using the channel-native identifier as the sole
-     * identifier. Grants exactly one role — SPACE_OWNER for option 2,
+     * identifier. Grants exactly one role — SPACE_OWNER when `$asOwner`,
      * CUSTOMER otherwise.
      */
-    private function createAccount(BotSession $session): OutboundReply
+    private function createAccount(BotSession $session, bool $asOwner): OutboundReply
     {
-        $asOwner = ($session->getData()['role_choice'] ?? null) === '2';
-        $role    = $asOwner ? RoleTypes::SPACE_OWNER : RoleTypes::CUSTOMER;
+        $role = $asOwner ? RoleTypes::SPACE_OWNER : RoleTypes::CUSTOMER;
 
         $user = $this->createUserForSession($session, $role);
 
@@ -241,22 +205,6 @@ class OnboardingFlow
     private function unusablePassword(): string
     {
         return Hash::make(Str::password(40));
-    }
-
-    private function channelLabel(BotSession $session): string
-    {
-        return $session->getChannel() === 'telegram'
-            ? 'حساب تيليجرام الحالي'
-            : 'رقم واتساب الحالي';
-    }
-
-    private function displayRecipient(BotSession $session): string
-    {
-        $recipient = $session->getRecipient();
-
-        return $session->getChannel() === 'telegram'
-            ? "Telegram: {$recipient}"
-            : '📱 +' . ltrim($recipient, '+');
     }
 
     /**
