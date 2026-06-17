@@ -66,7 +66,7 @@ class MenuRenderer
         if ($isCustomer) {
             $lines[] = "*اذا كنت سائق:*";
             $lines[] = "4️⃣  أقرب موقف لي";
-            $lines[] = "5️⃣  حجز موقف مسبق ودفع مسبق ⏰";
+            $lines[] = "5️⃣  حجز موقف مسبق ⏰";
             $lines[] = '';
         }
 
