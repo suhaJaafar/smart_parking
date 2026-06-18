@@ -35,6 +35,7 @@ class TelegramTransport implements BotTransport
         match ($reply->type) {
             OutboundReply::TYPE_TEXT    => $this->sendText($recipient, $reply->body),
             OutboundReply::TYPE_CTA_URL => $this->sendCtaUrl($recipient, $reply->body, $reply->ctaText ?? '', $reply->url ?? ''),
+            OutboundReply::TYPE_BUTTONS => $this->sendButtons($recipient, $reply->body, $reply->options),
             default                     => null,
         };
     }
@@ -65,6 +66,51 @@ class TelegramTransport implements BotTransport
             // Fallback to plain text so the user still sees something useful.
             $this->sendText($chatId, $body . "\n\n" . $url);
         }
+    }
+
+    /**
+     * A tap-to-choose prompt rendered as a vertical inline keyboard. Each
+     * option's `id` is sent back verbatim as `callback_data` when tapped,
+     * which {@see \App\Bots\Channels\Telegram\TelegramInboundParser} turns
+     * into ordinary inbound text for the flow to interpret.
+     *
+     * Telegram caps `callback_data` at 64 bytes.
+     *
+     * @param array<int, array{id: string, title: string, description?: string}> $options
+     */
+    private function sendButtons(string $chatId, string $body, array $options): void
+    {
+        $keyboard = array_map(static fn (array $o): array => [[
+            'text'          => mb_substr($o['title'], 0, 64),
+            'callback_data' => mb_substr($o['id'], 0, 64),
+        ]], array_values($options));
+
+        $ok = $this->dispatch('sendMessage', [
+            'chat_id'      => $chatId,
+            'text'         => $body,
+            'parse_mode'   => 'Markdown',
+            'reply_markup' => ['inline_keyboard' => $keyboard],
+        ]);
+
+        if (!$ok) {
+            $this->sendText($chatId, $this->optionsAsText($body, $options));
+        }
+    }
+
+    /**
+     * Plain-text fallback when an interactive send fails: the prompt body
+     * followed by each option's title on its own line.
+     *
+     * @param array<int, array{id: string, title: string, description?: string}> $options
+     */
+    private function optionsAsText(string $body, array $options): string
+    {
+        $lines = [$body, ''];
+        foreach (array_values($options) as $o) {
+            $lines[] = '• ' . $o['title'];
+        }
+
+        return implode("\n", $lines);
     }
 
     /**

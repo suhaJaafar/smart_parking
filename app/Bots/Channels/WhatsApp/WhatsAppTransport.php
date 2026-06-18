@@ -34,6 +34,7 @@ class WhatsAppTransport implements BotTransport
         match ($reply->type) {
             OutboundReply::TYPE_TEXT    => $this->sendText($recipient, $reply->body),
             OutboundReply::TYPE_CTA_URL => $this->sendCtaUrl($recipient, $reply->body, $reply->ctaText ?? '', $reply->url ?? ''),
+            OutboundReply::TYPE_BUTTONS => $this->sendButtons($recipient, $reply->body, $reply->options, $reply->listButton),
             default                     => null,
         };
     }
@@ -73,6 +74,96 @@ class WhatsAppTransport implements BotTransport
         if (!$ok) {
             $this->sendText($to, $body . "\n\n" . $url);
         }
+    }
+
+    /**
+     * A tap-to-choose prompt. WhatsApp offers two native widgets and we
+     * pick based on option count:
+     *   - ≤ 3 options → interactive *reply buttons*
+     *   - > 3 options → interactive *list* (up to 10 rows)
+     *
+     * The chosen option's `id` is echoed back by WhatsApp as
+     * `button_reply.id` / `list_reply.id`, which the inbound parser maps
+     * to ordinary text for the flow to interpret.
+     *
+     * Meta limits: reply-button title ≤ 20 chars, list-row title ≤ 24,
+     * list-row description ≤ 72, list/section labels ≤ 24, body ≤ 1024.
+     *
+     * @param array<int, array{id: string, title: string, description?: string}> $options
+     */
+    private function sendButtons(string $to, string $body, array $options, ?string $listButton): void
+    {
+        $options = array_values($options);
+
+        if ($options === []) {
+            $this->sendText($to, $body);
+            return;
+        }
+
+        if (count($options) <= 3) {
+            $buttons = array_map(static fn (array $o): array => [
+                'type'  => 'reply',
+                'reply' => [
+                    'id'    => mb_substr($o['id'], 0, 256),
+                    'title' => mb_substr($o['title'], 0, 20),
+                ],
+            ], $options);
+
+            $ok = $this->dispatch($to, [
+                'type'        => 'interactive',
+                'interactive' => [
+                    'type'   => 'button',
+                    'body'   => ['text' => mb_substr($body, 0, 1024)],
+                    'action' => ['buttons' => $buttons],
+                ],
+            ]);
+        } else {
+            $rows = array_map(static function (array $o): array {
+                $row = [
+                    'id'    => mb_substr($o['id'], 0, 200),
+                    'title' => mb_substr($o['title'], 0, 24),
+                ];
+                if (!empty($o['description'])) {
+                    $row['description'] = mb_substr($o['description'], 0, 72);
+                }
+                return $row;
+            }, array_slice($options, 0, 10));
+
+            $ok = $this->dispatch($to, [
+                'type'        => 'interactive',
+                'interactive' => [
+                    'type'   => 'list',
+                    'body'   => ['text' => mb_substr($body, 0, 1024)],
+                    'action' => [
+                        'button'   => mb_substr($listButton ?: 'اختر', 0, 20),
+                        'sections' => [[
+                            'title' => 'الخيارات',
+                            'rows'  => $rows,
+                        ]],
+                    ],
+                ],
+            ]);
+        }
+
+        if (!$ok) {
+            $this->sendText($to, $this->optionsAsText($body, $options));
+        }
+    }
+
+    /**
+     * Plain-text fallback when an interactive send fails: the prompt body
+     * followed by each option's title on its own line.
+     *
+     * @param array<int, array{id: string, title: string, description?: string}> $options
+     */
+    private function optionsAsText(string $body, array $options): string
+    {
+        $lines = [$body, ''];
+        foreach (array_values($options) as $o) {
+            $lines[] = '• ' . $o['title'];
+        }
+
+        return implode("\n", $lines);
     }
 
     /**
