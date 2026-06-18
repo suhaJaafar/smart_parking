@@ -27,6 +27,12 @@ final class DigitNormalizer
         '۵' => '5', '۶' => '6', '۷' => '7', '۸' => '8', '۹' => '9',
     ];
 
+    /** ASCII 0–9 → Arabic-Indic ٠–٩, for rendering numbers back to the user. */
+    private const ASCII_TO_ARABIC = [
+        '0' => '٠', '1' => '١', '2' => '٢', '3' => '٣', '4' => '٤',
+        '5' => '٥', '6' => '٦', '7' => '٧', '8' => '٨', '9' => '٩',
+    ];
+
     /**
      * Return $input with any Arabic-Indic or Persian digit replaced by
      * its ASCII counterpart. All other characters are preserved as-is,
@@ -35,5 +41,15 @@ final class DigitNormalizer
     public static function toAscii(string $input): string
     {
         return strtr($input, self::MAP);
+    }
+
+    /**
+     * Return $input with any ASCII digit replaced by its Arabic-Indic
+     * counterpart. Use when rendering numbers inside Arabic UI text so the
+     * digits match the surrounding script. All other characters are kept.
+     */
+    public static function toArabic(string $input): string
+    {
+        return strtr($input, self::ASCII_TO_ARABIC);
     }
 }

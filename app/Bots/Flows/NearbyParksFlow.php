@@ -13,6 +13,7 @@ use App\Repositories\Contracts\ParkRepositoryInterface;
 use App\Services\ReservationService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use RuntimeException;
 use Throwable;
 
@@ -31,6 +32,9 @@ class NearbyParksFlow
     private const TTL_MINUTES = 10;
     private const RADIUS_METERS = 5000;
     private const LIMIT = 5;
+
+    /** Prefix used to tag a tapped park button so it round-trips as inbound text. */
+    private const PARK_OPTION_PREFIX = 'park:';
 
     public function __construct(
         private readonly ParkRepositoryInterface $parks,
@@ -100,9 +104,10 @@ class NearbyParksFlow
             return OutboundReply::text("😔 لا توجد مواقف فارغة ضمن {$km} كم من موقعك.");
         }
 
-        // Persist the result list keyed by 1..N so the user can pick by number.
+        // Persist the result list keyed by 1..N so a tapped button (or a typed
+        // number, as a fallback) can be resolved back to a concrete park.
         $catalog = [];
-        $lines   = ["📍 أقرب المواقف الفارغة إليك:\n"];
+        $options = [];
 
         foreach ($parks as $i => $park) {
             $n        = $i + 1;
@@ -116,13 +121,12 @@ class NearbyParksFlow
                 'free_spaces' => (int)   $park->free_spaces,
             ];
 
-            $lines[] = "*{$n}. {$park->name}*";
-            $lines[] = "   📏 {$distance}  •  🅿️ {$park->free_spaces} مكان فارغ";
-            $lines[] = '';
+            $options[] = [
+                'id'          => self::PARK_OPTION_PREFIX . $park->id,
+                'title'       => $this->parkChoiceLabel($park->name, $distance, (int) $park->free_spaces),
+                'description' => $this->parkChoiceDetail($park->name, $distance, (int) $park->free_spaces),
+            ];
         }
-
-        $lines[] = "أرسل رقم الموقف للحجز (مثال: 1)";
-        $lines[] = "أو أرسل *0* للإلغاء.";
 
         $session->update([
             'step'       => 'choose_park',
@@ -130,26 +134,28 @@ class NearbyParksFlow
             'expires_at' => now()->addMinutes(self::TTL_MINUTES),
         ]);
 
-        return OutboundReply::ctaUrl(
-            body:    implode("\n", $lines),
-            ctaText: '🗺️ عرض على الخريطة',
-            url:     $this->buildAllOnMapUrl($parks, $lat, $lng),
+        $body = "📍 أقرب المواقف الفارغة إليك:\n\n"
+              . "اختر الموقف الذي تريد الحجز فيه، أو أرسل *0* للإلغاء.";
+
+        return OutboundReply::buttons(
+            body:       $body,
+            options:    $options,
+            listButton: 'اختر الموقف',
+            linkButton: [
+                'title' => '🗺️ عرض الكل على الخريطة',
+                'url'   => $this->buildAllOnMapUrl($parks, $lat, $lng),
+            ],
         );
     }
 
     private function reserve(BotSession $session, string $message): OutboundReply
     {
-        $msg = trim(DigitNormalizer::toAscii($message));
-        if (!ctype_digit($msg)) {
-            return OutboundReply::text(Prompt::ask("⚠️ أرسل رقم الموقف فقط (مثال: 1)."));
-        }
-
         $catalog = $session->getData()['parks'] ?? [];
-        $choice  = $catalog[(int) $msg] ?? null;
+        $choice  = $this->resolveParkChoice(trim($message), $catalog);
 
         if (!$choice) {
             return OutboundReply::text(
-                Prompt::ask("⚠️ رقم غير صالح. اختر من الأرقام في القائمة أعلاه.")
+                Prompt::ask("⚠️ اختر موقفاً من الأزرار في القائمة أعلاه.")
             );
         }
 
@@ -229,11 +235,58 @@ class NearbyParksFlow
         }
     }
 
+    /**
+     * Resolve the customer's park choice from either a tapped button (id of
+     * the form "park:<uuid>") or a typed list number, against the catalog
+     * persisted when the results were shown.
+     *
+     * @param  array<int|string, array{id:string,name:string,lat:float,lng:float,free_spaces:int}>  $catalog
+     * @return array{id:string,name:string,lat:float,lng:float,free_spaces:int}|null
+     */
+    private function resolveParkChoice(string $raw, array $catalog): ?array
+    {
+        if (str_starts_with(mb_strtolower($raw), self::PARK_OPTION_PREFIX)) {
+            $parkId = Str::after($raw, self::PARK_OPTION_PREFIX);
+            return collect($catalog)->firstWhere('id', $parkId);
+        }
+
+        $number = DigitNormalizer::toAscii($raw);
+        if (ctype_digit($number)) {
+            return $catalog[(int) $number] ?? null;
+        }
+
+        return null;
+    }
+
     private function formatDistance(int $meters): string
     {
-        return $meters >= 1000
-            ? number_format($meters / 1000, 1) . ' كم'
-            : "{$meters} م";
+        $value = $meters >= 1000
+            ? rtrim(rtrim(number_format($meters / 1000, 1), '0'), '.') . ' كم'
+            : "{$meters} متر";
+
+        return DigitNormalizer::toArabic($value);
+    }
+
+    /**
+     * Tappable label for a park choice, e.g.
+     *   "كراج المروج ، يبعد مسافة ١٠٠ متر ، ٢٠ مكان متاح متوفر".
+     * Arabic-named parks read "يبعد مسافة", others read "يبعد".
+     */
+    private function parkChoiceLabel(string $name, string $distance, int $freeSpaces): string
+    {
+        return trim($name) . ' ، ' . $this->parkChoiceDetail($name, $distance, $freeSpaces);
+    }
+
+    /**
+     * The distance + availability portion of a park choice, used as the
+     * label suffix and as the WhatsApp list-row description.
+     */
+    private function parkChoiceDetail(string $name, string $distance, int $freeSpaces): string
+    {
+        $verb = preg_match('/\p{Arabic}/u', $name) ? 'يبعد مسافة' : 'يبعد';
+        $free = DigitNormalizer::toArabic((string) $freeSpaces);
+
+        return "{$verb} {$distance} ، {$free} مكان متاح متوفر";
     }
 
     /**

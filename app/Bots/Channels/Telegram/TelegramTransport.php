@@ -35,7 +35,7 @@ class TelegramTransport implements BotTransport
         match ($reply->type) {
             OutboundReply::TYPE_TEXT    => $this->sendText($recipient, $reply->body),
             OutboundReply::TYPE_CTA_URL => $this->sendCtaUrl($recipient, $reply->body, $reply->ctaText ?? '', $reply->url ?? ''),
-            OutboundReply::TYPE_BUTTONS => $this->sendButtons($recipient, $reply->body, $reply->options),
+            OutboundReply::TYPE_BUTTONS => $this->sendButtons($recipient, $reply->body, $reply->options, $reply->linkButton),
             default                     => null,
         };
     }
@@ -77,13 +77,26 @@ class TelegramTransport implements BotTransport
      * Telegram caps `callback_data` at 64 bytes.
      *
      * @param array<int, array{id: string, title: string, description?: string}> $options
+     * @param array{title: string, url: string}|null $linkButton Optional URL
+     *        button shown as the first row, above the choices.
      */
-    private function sendButtons(string $chatId, string $body, array $options): void
+    private function sendButtons(string $chatId, string $body, array $options, ?array $linkButton = null): void
     {
-        $keyboard = array_map(static fn (array $o): array => [[
-            'text'          => mb_substr($o['title'], 0, 64),
-            'callback_data' => mb_substr($o['id'], 0, 64),
-        ]], array_values($options));
+        $keyboard = [];
+
+        if ($linkButton !== null) {
+            $keyboard[] = [[
+                'text' => mb_substr($linkButton['title'], 0, 64),
+                'url'  => $linkButton['url'],
+            ]];
+        }
+
+        foreach (array_values($options) as $o) {
+            $keyboard[] = [[
+                'text'          => mb_substr($o['title'], 0, 64),
+                'callback_data' => mb_substr($o['id'], 0, 64),
+            ]];
+        }
 
         $ok = $this->dispatch('sendMessage', [
             'chat_id'      => $chatId,
@@ -93,7 +106,11 @@ class TelegramTransport implements BotTransport
         ]);
 
         if (!$ok) {
-            $this->sendText($chatId, $this->optionsAsText($body, $options));
+            $fallback = $this->optionsAsText($body, $options);
+            if ($linkButton !== null) {
+                $fallback .= "\n\n" . $linkButton['title'] . ": " . $linkButton['url'];
+            }
+            $this->sendText($chatId, $fallback);
         }
     }
 

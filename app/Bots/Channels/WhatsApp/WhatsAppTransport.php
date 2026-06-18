@@ -34,7 +34,7 @@ class WhatsAppTransport implements BotTransport
         match ($reply->type) {
             OutboundReply::TYPE_TEXT    => $this->sendText($recipient, $reply->body),
             OutboundReply::TYPE_CTA_URL => $this->sendCtaUrl($recipient, $reply->body, $reply->ctaText ?? '', $reply->url ?? ''),
-            OutboundReply::TYPE_BUTTONS => $this->sendButtons($recipient, $reply->body, $reply->options, $reply->listButton),
+            OutboundReply::TYPE_BUTTONS => $this->sendButtons($recipient, $reply->body, $reply->options, $reply->listButton, $reply->linkButton),
             default                     => null,
         };
     }
@@ -90,10 +90,17 @@ class WhatsAppTransport implements BotTransport
      * list-row description ≤ 72, list/section labels ≤ 24, body ≤ 1024.
      *
      * @param array<int, array{id: string, title: string, description?: string}> $options
+     * @param array{title: string, url: string}|null $linkButton A URL link.
+     *        WhatsApp lists/buttons can't host a URL button alongside the
+     *        choices, so it's appended to the body text instead.
      */
-    private function sendButtons(string $to, string $body, array $options, ?string $listButton): void
+    private function sendButtons(string $to, string $body, array $options, ?string $listButton, ?array $linkButton = null): void
     {
         $options = array_values($options);
+
+        if ($linkButton !== null) {
+            $body = $body . "\n\n" . $linkButton['title'] . ":\n" . $linkButton['url'];
+        }
 
         if ($options === []) {
             $this->sendText($to, $body);

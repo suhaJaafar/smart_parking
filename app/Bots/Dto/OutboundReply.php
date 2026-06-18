@@ -28,6 +28,7 @@ final class OutboundReply
 
     /**
      * @param array<int, array{id: string, title: string, description?: string}> $options
+     * @param array{title: string, url: string}|null $linkButton
      */
     private function __construct(
         public readonly string  $type,
@@ -36,6 +37,7 @@ final class OutboundReply
         public readonly ?string $url        = null,
         public readonly array   $options    = [],
         public readonly ?string $listButton = null,
+        public readonly ?array  $linkButton = null,
     ) {}
 
     public static function text(string $body): self
@@ -64,9 +66,16 @@ final class OutboundReply
      *
      * @param array<int, array{id: string, title: string, description?: string}> $options
      * @param ?string $listButton Label for the WhatsApp list "open" button.
+     * @param array{title: string, url: string}|null $linkButton A URL button
+     *        rendered above the options (Telegram URL button; on WhatsApp the
+     *        link is appended to the body since lists can't host URL buttons).
      */
-    public static function buttons(string $body, array $options, ?string $listButton = null): self
-    {
+    public static function buttons(
+        string $body,
+        array $options,
+        ?string $listButton = null,
+        ?array $linkButton = null,
+    ): self {
         if ($body === '') {
             throw new InvalidArgumentException('buttons reply requires a body.');
         }
@@ -89,11 +98,21 @@ final class OutboundReply
             throw new InvalidArgumentException('buttons reply requires at least one option.');
         }
 
+        $link = null;
+        if ($linkButton !== null) {
+            $linkTitle = (string) ($linkButton['title'] ?? '');
+            $linkUrl   = (string) ($linkButton['url'] ?? '');
+            if ($linkTitle !== '' && $linkUrl !== '') {
+                $link = ['title' => $linkTitle, 'url' => $linkUrl];
+            }
+        }
+
         return new self(
             type: self::TYPE_BUTTONS,
             body: $body,
             options: $clean,
             listButton: $listButton,
+            linkButton: $link,
         );
     }
 
