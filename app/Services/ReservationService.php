@@ -7,6 +7,7 @@ use App\Models\Park;
 use App\Models\Reserve;
 use App\Models\User;
 use App\Services\Payments\PaymentService;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -272,5 +273,25 @@ class ReservationService
             ->with('user')
             ->latest('created_at')
             ->first();
+    }
+
+    /**
+     * All still-pending holds (START) for a park, newest first, with each
+     * reservation's customer and that customer's cars (newest first)
+     * eager-loaded — a single query, no per-row lookups.
+     *
+     * Drives the owner's car-entry picker: instead of typing a booking
+     * code, the owner taps the arriving customer straight from this list.
+     *
+     * @return Collection<int, Reserve>
+     */
+    public function pendingForPark(Park $park, int $limit = 10): Collection
+    {
+        return Reserve::where('park_id', $park->id)
+            ->where('status', Reserve::STATUS_START)
+            ->with(['user.cars' => fn ($query) => $query->latest()])
+            ->latest('created_at')
+            ->take($limit)
+            ->get();
     }
 }
