@@ -19,11 +19,13 @@ use Illuminate\Support\Str;
  * Flow:
  *   ask_role  → "Are you a (1) Driver / (2) Park Owner?"
  *     • The account is then created automatically using the channel-native
- *       identifier (phone for WhatsApp, chat_id for Telegram) — no
- *       confirmation prompt.
+ *       identifier (phone for WhatsApp, chat_id for Telegram).
+ *   ask_name  → only reached when the channel reported no display name;
+ *     asks the user once for their name (or *تخطي* to skip).
  *
- * The user is never asked for their name — the channel-native identifier
- * (phone for WhatsApp, chat_id for Telegram) is the only thing we need.
+ * Naming is tiered: adopt the channel-reported display name (Telegram
+ * first/last name, WhatsApp profile name) when present; otherwise ask the
+ * user once; otherwise fall back to a generated placeholder.
  */
 class OnboardingFlow
 {
@@ -51,6 +53,7 @@ class OnboardingFlow
 
         return match ($session->getStep()) {
             'ask_role' => $this->handleRole($session, $message),
+            'ask_name' => $this->handleName($session, $message),
             default    => OutboundReply::empty(),
         };
     }
@@ -132,6 +135,55 @@ class OnboardingFlow
      */
     private function createAccount(BotSession $session, bool $asOwner): OutboundReply
     {
+        // Tier 1: the channel already told us a real name → use it, no prompt.
+        if ($this->resolveDisplayName($session) !== null) {
+            return $this->finalizeAccount($session, $asOwner);
+        }
+
+        // Tier 2: no platform name → ask once, then remember it on the User.
+        $session->update([
+            'step'       => 'ask_name',
+            'data'       => ['as_owner' => $asOwner],
+            'expires_at' => now()->addMinutes(self::TTL_MINUTES),
+        ]);
+
+        return OutboundReply::text(
+            "📝 ما اسمك؟ سيظهر هذا الاسم لمالك الموقف عند وصولك.\n"
+            . "_أرسل اسمك، أو أرسل *تخطي* لاستخدام اسم افتراضي._"
+        );
+    }
+
+    /**
+     * Second onboarding step — reached only when the channel reported no
+     * display name. Adopt the typed name (or a generated default on
+     * "skip"), then create the account. The name is fed through the same
+     * carrier the channel uses so account creation stays single-path.
+     */
+    private function handleName(BotSession $session, string $message): OutboundReply
+    {
+        $asOwner = (bool) ($session->getData()['as_owner'] ?? false);
+        $raw     = trim($message);
+
+        // Anything but an explicit skip is treated as the chosen name.
+        if (!in_array(mb_strtolower($raw), ['تخطي', 'skip'], true)) {
+            $name = $this->sanitizeName($raw);
+            if ($name === null) {
+                return OutboundReply::text(
+                    "⚠️ اسم غير صالح. أرسل اسماً بين 1 و 100 حرف، أو *تخطي*."
+                );
+            }
+            $session->setProfileName($name);
+        }
+
+        return $this->finalizeAccount($session, $asOwner);
+    }
+
+    /**
+     * Persist the account + role, link the session, and emit the menu.
+     * Shared tail of both the immediate (named) and ask-once paths.
+     */
+    private function finalizeAccount(BotSession $session, bool $asOwner): OutboundReply
+    {
         $role = $asOwner ? RoleTypes::SPACE_OWNER : RoleTypes::CUSTOMER;
 
         $user = $this->createUserForSession($session, $role);
@@ -177,7 +229,7 @@ class OnboardingFlow
         $recipient = $session->getRecipient();
 
         $attrs = [
-            'name'     => $this->generateDefaultName($recipient),
+            'name'     => $this->resolveDisplayName($session) ?? $this->generateDefaultName($recipient),
             'email'    => "{$recipient}@{$session->getChannel()}.parkiq.local",
             'password' => $this->unusablePassword(),
         ];
@@ -216,5 +268,32 @@ class OnboardingFlow
         $digits = preg_replace('/\D/', '', $recipient);
         $tail   = mb_substr($digits, -4);
         return $tail !== '' ? "سائق {$tail}" : 'سائق';
+    }
+
+    /**
+     * The channel-reported display name (Telegram first/last name,
+     * WhatsApp profile name), cleaned for storage. Null when the channel
+     * sent nothing usable.
+     */
+    private function resolveDisplayName(BotSession $session): ?string
+    {
+        return $this->sanitizeName($session->getProfileName());
+    }
+
+    /**
+     * Normalise a free-form name: strip control characters, collapse
+     * inner whitespace, and bound the length. Returns null when nothing
+     * usable remains.
+     */
+    private function sanitizeName(?string $name): ?string
+    {
+        if ($name === null) {
+            return null;
+        }
+
+        $clean = preg_replace('/\p{C}+/u', '', $name);
+        $clean = trim((string) preg_replace('/\s+/u', ' ', (string) $clean));
+
+        return $clean !== '' ? mb_substr($clean, 0, 100) : null;
     }
 }

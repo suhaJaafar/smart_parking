@@ -25,6 +25,17 @@ interface BotSession
      */
     public function getRecipient(): string;
 
+    /**
+     * Display name the channel itself reported for this user — Telegram's
+     * first/last name (or @username), WhatsApp's profile name. Transient
+     * (never persisted on the session row); set per-request by the channel
+     * controller so onboarding can adopt a real name instead of a
+     * generated placeholder. Null when the channel sent no name.
+     */
+    public function getProfileName(): ?string;
+
+    public function setProfileName(?string $name): void;
+
     public function getFlow(): ?string;
     public function getStep(): string;
     /** @return array<string, mixed> */

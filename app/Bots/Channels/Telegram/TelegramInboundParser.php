@@ -24,7 +24,7 @@ class TelegramInboundParser
     /**
      * Extract a single normalised inbound message from a webhook update.
      *
-     * @return array{chat_id: string, type: string, text: string}|null
+     * @return array{chat_id: string, type: string, text: string, name: ?string}|null
      *         Null when the update has no actionable content.
      */
     public function fromUpdate(array $update): ?array
@@ -43,6 +43,7 @@ class TelegramInboundParser
                 'chat_id' => (string) $chatId,
                 'type'    => ConversationEngine::TYPE_TEXT,
                 'text'    => $data,
+                'name'    => $this->extractName($cb['from'] ?? null),
             ];
         }
 
@@ -56,6 +57,8 @@ class TelegramInboundParser
             return null;
         }
 
+        $name = $this->extractName($message['from'] ?? null);
+
         // Location share — both flows and the location shortcut want
         // "lat,lng" so we serialise it eagerly here.
         if (isset($message['location'])) {
@@ -66,6 +69,7 @@ class TelegramInboundParser
                     'chat_id' => (string) $chatId,
                     'type'    => ConversationEngine::TYPE_LOCATION,
                     'text'    => sprintf('%s,%s', $lat, $lng),
+                    'name'    => $name,
                 ];
             }
         }
@@ -77,6 +81,7 @@ class TelegramInboundParser
                 'chat_id' => (string) $chatId,
                 'type'    => ConversationEngine::TYPE_TEXT,
                 'text'    => preg_replace('/\D/', '', (string) $message['contact']['phone_number']),
+                'name'    => $name,
             ];
         }
 
@@ -89,7 +94,36 @@ class TelegramInboundParser
             'chat_id' => (string) $chatId,
             'type'    => ConversationEngine::TYPE_TEXT,
             'text'    => $text,
+            'name'    => $name,
         ];
+    }
+
+    /**
+     * Build a display name from a Telegram `from` object. Prefers the
+     * real first/last name, falls back to the @username, null when the
+     * object carries neither.
+     *
+     * @param array<string, mixed>|null $from
+     */
+    private function extractName(?array $from): ?string
+    {
+        if (!is_array($from)) {
+            return null;
+        }
+
+        $full = trim(sprintf(
+            '%s %s',
+            (string) ($from['first_name'] ?? ''),
+            (string) ($from['last_name'] ?? ''),
+        ));
+
+        if ($full !== '') {
+            return $full;
+        }
+
+        $username = trim((string) ($from['username'] ?? ''));
+
+        return $username !== '' ? $username : null;
     }
 
     /**
