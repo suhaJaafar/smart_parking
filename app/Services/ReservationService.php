@@ -30,10 +30,12 @@ class ReservationService
 
     /**
      * When a pre-booking carries an explicit arrival time, the hold stays
-     * valid until that time plus this grace window — covering a customer
-     * who shows up a little late without the sweep releasing their slot.
+     * valid until that time plus this grace window. After it lapses without
+     * the owner entering the car, the every-minute sweep
+     * ({@see self::expireStale()}) releases the slot — unless the customer
+     * has already paid, in which case the slot is theirs and never expires.
      */
-    public const PRE_BOOKING_GRACE_MINUTES = 60;
+    public const PRE_BOOKING_GRACE_MINUTES = 10;
 
     public function __construct(
         private readonly PaymentService $payments,
