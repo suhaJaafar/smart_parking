@@ -22,6 +22,7 @@ class Reserve extends Model
         'park_id',
         'status',
         'expires_at',
+        'scheduled_at',
         'booking_code',
         'is_pre_booking',
     ];
@@ -30,6 +31,7 @@ class Reserve extends Model
     {
         return [
             'expires_at'     => 'datetime',
+            'scheduled_at'   => 'datetime',
             'is_pre_booking' => 'boolean',
         ];
     }

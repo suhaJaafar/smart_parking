@@ -440,7 +440,7 @@ class ConversationEngine
         ];
 
         if ($isOwner) {
-            $lines[] = "🅿️ *مالك موقف:*";
+            $lines[] = "📍 *مالك موقف:*";
             $lines[] = "   *1*  دخول سيارة للكراج";
             $lines[] = "   *2*  خروج سيارة من الكراج";
             $lines[] = "   *3*  إنشاء موقف جديد";
@@ -479,7 +479,7 @@ class ConversationEngine
         $user  = $session->getUser();
         $roles = $user->roles->pluck('role')
             ->map(fn ($r) => match ($r) {
-                RoleTypes::SPACE_OWNER => '🅿️ مالك موقف',
+                RoleTypes::SPACE_OWNER => '📍 مالك موقف',
                 RoleTypes::CUSTOMER, RoleTypes::USER => '🚗 سائق',
                 default => null,
             })
@@ -584,13 +584,13 @@ class ConversationEngine
             $body = $this->parkInfo($park, withIndex: null, withMapUrl: false);
 
             return OutboundReply::ctaUrl(
-                body:    "🅿️ *موقفك المسجّل:*\n\n" . $body,
+                body:    "📍 *موقفك المسجّل:*\n\n" . $body,
                 ctaText: '🗺️ عرض الموقع',
                 url:     "https://www.google.com/maps?q={$park->lat},{$park->lng}",
             );
         }
 
-        $lines = ["🅿️ *مواقفك المسجّلة* (" . $parks->count() . "):", ''];
+        $lines = ["📍 *مواقفك المسجّلة* (" . $parks->count() . "):", ''];
         foreach ($parks as $i => $park) {
             $lines[] = $this->parkInfo($park, withIndex: $i + 1, withMapUrl: true);
             $lines[] = '';
@@ -610,7 +610,7 @@ class ConversationEngine
             $line .= "   المدينة: {$city}\n";
         }
         if ($withMapUrl) {
-            $line .= "   📍 https://www.google.com/maps?q={$park->lat},{$park->lng}";
+            $line .= "   📍 [الموقع على الخريطة](https://www.google.com/maps?q={$park->lat},{$park->lng})";
         }
 
         return rtrim($line);

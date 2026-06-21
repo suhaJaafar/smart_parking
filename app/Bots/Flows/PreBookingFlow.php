@@ -12,8 +12,10 @@ use App\Models\Reserve;
 use App\Repositories\Contracts\ParkRepositoryInterface;
 use App\Services\Payments\PaymentService;
 use App\Services\ReservationService;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use RuntimeException;
 use Throwable;
 
@@ -29,6 +31,7 @@ use Throwable;
  * Steps:
  *   ask_location → user shares the location of the place they want to park at
  *   choose_park  → user replies with the number of the park to reserve
+ *   ask_time     → user picks (or types) the time they will arrive
  *   confirm      → user sends "تم الحجز" to confirm and receive the pay link
  */
 class PreBookingFlow
@@ -37,6 +40,15 @@ class PreBookingFlow
     private const TTL_MINUTES = 15;
     private const RADIUS_METERS = 5000;
     private const LIMIT = 5;
+
+    /** Callback payload prefix for a tapped park choice (carries its list number). */
+    private const PARK_PREFIX = 'park:';
+
+    /** Callback payload prefix for a tapped time preset (carries a unix ts). */
+    private const TIME_PREFIX = 'when:';
+
+    /** How far ahead a pre-booking may be scheduled. */
+    private const MAX_SCHEDULE_DAYS = 7;
 
     /** Words that confirm the booking and move the customer to payment. */
     private const CONFIRM_WORDS = ['تم الحجز', 'تم', 'تأكيد', 'confirm', 'دفع', 'pay'];
@@ -65,7 +77,8 @@ class PreBookingFlow
 
         return match ($session->getStep()) {
             'ask_location' => $this->showResults($session, $message),
-            'choose_park'  => $this->reserve($session, $message),
+            'choose_park'  => $this->onParkChosen($session, $message),
+            'ask_time'     => $this->onTimeChosen($session, $message),
             'confirm'      => $this->confirmAndPay($session, $message),
             default        => OutboundReply::empty(),
         };
@@ -111,9 +124,11 @@ class PreBookingFlow
             return OutboundReply::text("😔 لا توجد مواقف فارغة ضمن {$km} كم من المكان المطلوب.");
         }
 
-        // Persist the result list keyed by 1..N so the user can pick by number.
+        // Persist the result list keyed by 1..N so a tapped button (or a typed
+        // number, as a fallback) resolves back to a concrete park. The parks
+        // are shown *only* as tappable choices — never duplicated in the body.
         $catalog = [];
-        $lines   = ["📍 أقرب المواقف الفارغة للمكان المطلوب:\n"];
+        $options = [];
 
         foreach ($parks as $i => $park) {
             $n        = $i + 1;
@@ -127,13 +142,12 @@ class PreBookingFlow
                 'free_spaces' => (int)   $park->free_spaces,
             ];
 
-            $lines[] = "*{$n}. {$park->name}*";
-            $lines[] = "   📏 {$distance}  •  🅿️ {$park->free_spaces} مكان فارغ";
-            $lines[] = '';
+            $options[] = [
+                'id'          => self::PARK_PREFIX . $n,
+                'title'       => $this->parkChoiceLabel($park->name, $distance, (int) $park->free_spaces),
+                'description' => $this->parkChoiceDetail($park->name, $distance, (int) $park->free_spaces),
+            ];
         }
-
-        $lines[] = "أرسل رقم الموقف للحجز المسبق (مثال: 1)";
-        $lines[] = "أو أرسل *0* للإلغاء.";
 
         $session->update([
             'step'       => 'choose_park',
@@ -141,18 +155,33 @@ class PreBookingFlow
             'expires_at' => now()->addMinutes(self::TTL_MINUTES),
         ]);
 
-        return OutboundReply::ctaUrl(
-            body:    implode("\n", $lines),
-            ctaText: '🗺️ عرض على الخريطة',
-            url:     $this->buildAllOnMapUrl($parks, $lat, $lng),
+        $body = "📍 أقرب المواقف الفارغة للمكان المطلوب:\n\n"
+              . "اختر الموقف الذي تريد الحجز فيه، أو أرسل *0* للإلغاء.";
+
+        return OutboundReply::buttons(
+            body:       $body,
+            options:    $options,
+            listButton: 'اختر الموقف',
+            linkButton: [
+                'title' => '🗺️ عرض على الخريطة',
+                'url'   => $this->buildAllOnMapUrl($parks, $lat, $lng),
+            ],
         );
     }
 
-    private function reserve(BotSession $session, string $message): OutboundReply
+    /**
+     * Park chosen — validate the pick and ask *when* the customer will
+     * arrive before holding a slot. The reservation itself is created in
+     * {@see self::onTimeChosen()} once we know the time.
+     */
+    private function onParkChosen(BotSession $session, string $message): OutboundReply
     {
         $msg = trim(DigitNormalizer::toAscii($message));
+        if (Str::startsWith($msg, self::PARK_PREFIX)) {
+            $msg = substr($msg, strlen(self::PARK_PREFIX));
+        }
         if (!ctype_digit($msg)) {
-            return OutboundReply::text(Prompt::ask("⚠️ أرسل رقم الموقف فقط (مثال: 1)."));
+            return OutboundReply::text(Prompt::ask("⚠️ اختر الموقف من القائمة، أو أرسل رقمه (مثال: 1)."));
         }
 
         $catalog = $session->getData()['parks'] ?? [];
@@ -170,8 +199,74 @@ class PreBookingFlow
             return OutboundReply::text("❌ لم يعد هذا الموقف متاحاً.");
         }
 
+        $session->update([
+            'step'       => 'ask_time',
+            'data'       => ['park' => $choice],
+            'expires_at' => now()->addMinutes(self::TTL_MINUTES),
+        ]);
+
+        return $this->askTime($park);
+    }
+
+    /**
+     * Present the arrival time as a tap-to-pick list of concrete upcoming
+     * instants (a lightweight in-chat time picker), while still accepting a
+     * free-typed 12-hour time (e.g. "٣ العصر" or "٨ صباحاً غداً").
+     */
+    private function askTime(Park $park): OutboundReply
+    {
+        $options = [];
+        foreach ($this->timePresets() as $preset) {
+            $options[] = [
+                'id'          => self::TIME_PREFIX . $preset['at']->timestamp,
+                'title'       => $preset['label'],
+                'description' => $this->formatSchedule($preset['at']),
+            ];
+        }
+
+        return OutboundReply::buttons(
+            body: "📍 *{$park->name}*\n\n"
+                . "🕒 متى ستصل إلى الموقف؟\n"
+                . "اختر وقتاً من القائمة 👇، أو اكتبه بنفسك.\n"
+                . "_مثال: ٣ العصر او ٣:٣٠ العصر او  ٨ صباحاً غداً_",
+            options: $options,
+            listButton: '🕒 اختر الوقت',
+        );
+    }
+
+    /**
+     * Arrival time chosen — now place the hold for that time, notify the
+     * owner, and move the customer to the confirm/pay step.
+     */
+    private function onTimeChosen(BotSession $session, string $message): OutboundReply
+    {
+        $choice = $session->getData()['park'] ?? null;
+        if (!$choice) {
+            $session->reset();
+            return OutboundReply::text("❌ انتهت الجلسة. ابدأ من جديد.");
+        }
+
+        $scheduledAt = $this->parseSchedule($message);
+        if ($scheduledAt === null) {
+            return OutboundReply::text(Prompt::ask(
+                "⚠️ وقت غير صالح. اختر وقتاً من القائمة، أو اكتبه:\n"
+                . "_٣ العصر او ٣:٣٠ العصر او  ٨ صباحاً غداً_ (خلال ٧ أيام)"
+            ));
+        }
+
+        $park = Park::find($choice['id']);
+        if (!$park) {
+            $session->reset();
+            return OutboundReply::text("❌ لم يعد هذا الموقف متاحاً.");
+        }
+
         try {
-            $reserve = $this->reservations->reserve($session->getUser(), $park, preBooking: true);
+            $reserve = $this->reservations->reserve(
+                $session->getUser(),
+                $park,
+                preBooking: true,
+                scheduledAt: $scheduledAt,
+            );
         } catch (RuntimeException $e) {
             $session->reset();
             return OutboundReply::text(
@@ -191,14 +286,14 @@ class PreBookingFlow
             'expires_at' => now()->addMinutes(self::TTL_MINUTES),
         ]);
 
-        $expires = $reserve->expires_at->setTimezone(config('app.timezone'))->format('H:i');
-        $mapsUrl = sprintf('https://www.google.com/maps?q=%F,%F', $choice['lat'], $choice['lng']);
+        $schedule = $this->formatSchedule($reserve->scheduled_at ?? $scheduledAt);
+        $mapsUrl  = sprintf('https://www.google.com/maps?q=%F,%F', $choice['lat'], $choice['lng']);
 
         return OutboundReply::text(
             "✅ تم حجز مكان لك مسبقاً في *{$choice['name']}*\n\n"
-            . "🗺️ الاتجاهات: {$mapsUrl}\n"
-            . "⏰ صالح حتّى الساعة {$expires}\n"
-            . "🔑 *booking code:* `{$reserve->booking_code}`\n\n"
+            . "🕒 موعد وصولك: *{$schedule}*\n"
+            . "🗺️ للاتجاهات: [اضغط هنا]({$mapsUrl})\n"
+            . "🔑 *رمز الحجز:* `{$reserve->booking_code}`\n\n"
             . "💳 لإتمام الحجز، ادفع الآن بإرسال *تم الحجز*\n"
             . "_أو أرسل *0* للإلغاء._"
         );
@@ -233,15 +328,19 @@ class PreBookingFlow
 
         $session->reset();
 
-        $url    = route('payments.redirect', $payment->token);
-        $amount = number_format((float) $payment->amount, 0) . ' ' . $payment->currency;
+        $url      = route('payments.redirect', $payment->token);
+        $amount   = number_format((float) $payment->amount, 0) . ' ' . $payment->currency;
+        $schedule = $reserve->scheduled_at
+            ? $this->formatSchedule($reserve->scheduled_at)
+            : null;
 
         return OutboundReply::text(
             "💳 *الدفع المسبق لحجزك*\n\n"
-            . "🅿️ الموقف: *{$reserve->park->name}*\n"
+            . "📍 الموقف: *{$reserve->park->name}*\n"
+            . ($schedule ? "🕒 موعد الوصول: *{$schedule}*\n" : '')
             . "💰 المبلغ: *{$amount}*\n"
-            . "🔑 booking code: `{$reserve->booking_code}`\n\n"
-            . "لإتمام الدفع الآن:\n{$url}\n\n"
+            . "🔑 رمز الحجز: `{$reserve->booking_code}`\n\n"
+            . "💳 لإتمام عملية الدفع: [اضغط هنا]({$url})\n\n"
             . "_بعد الدفع، أعطِ رمز الحجز لصاحب الموقف عند وصولك._"
         );
     }
@@ -261,17 +360,19 @@ class PreBookingFlow
             $customer     = $reserve->user;
             $customerName = $customer?->name ?: 'سائق';
 
-            $expires = $reserve->expires_at
-                ? $reserve->expires_at->setTimezone(config('app.timezone'))->format('H:i')
-                : '—';
+            $schedule = $reserve->scheduled_at
+                ? $this->formatSchedule($reserve->scheduled_at)
+                : ($reserve->expires_at
+                    ? $this->formatSchedule($reserve->expires_at)
+                    : '—');
 
             $message = "🔔 *حجز مسبق جديد في موقفك*\n\n"
                      . "الموقف: *{$park->name}*\n"
                      . "الزبون: *{$customerName}*\n"
+                     . "🕒 موعد الوصول: *{$schedule}*\n"
                      . "booking code: *`{$reserve->booking_code}`*\n"
-                     . "صالح حتّى الساعة: {$expires}\n"
                      . "الأماكن المتبقية: *{$park->free_spaces}*\n\n"
-                     . "_حجز مسبق مدفوع \u2014 لا حاجة لإدخال السيارة لتفعيل الدفع._";
+                     . "_حجز مسبق مدفوع — لا حاجة لإدخال السيارة لتفعيل الدفع._";
 
             $this->notifier->notify($owner, OutboundReply::text($message));
         } catch (Throwable $e) {
@@ -285,9 +386,214 @@ class PreBookingFlow
 
     private function formatDistance(int $meters): string
     {
-        return $meters >= 1000
-            ? number_format($meters / 1000, 1) . ' كم'
-            : "{$meters} م";
+        $value = $meters >= 1000
+            ? rtrim(rtrim(number_format($meters / 1000, 1), '0'), '.') . ' كم'
+            : "{$meters} متر";
+
+        return DigitNormalizer::toArabic($value);
+    }
+
+    /**
+     * Tappable label for a park choice, e.g.
+     *   "كراج المروج ، يبعد مسافة ١٠٠ متر ، ٢٠ مكان متاح متوفر".
+     * Arabic-named parks read "يبعد مسافة", others read "يبعد".
+     */
+    private function parkChoiceLabel(string $name, string $distance, int $freeSpaces): string
+    {
+        return trim($name) . ' ، ' . $this->parkChoiceDetail($name, $distance, $freeSpaces);
+    }
+
+    /**
+     * The distance + availability portion of a park choice, used as the
+     * label suffix and as the WhatsApp list-row description.
+     */
+    private function parkChoiceDetail(string $name, string $distance, int $freeSpaces): string
+    {
+        $verb = preg_match('/\p{Arabic}/u', $name) ? 'يبعد مسافة' : 'يبعد';
+        $free = DigitNormalizer::toArabic((string) $freeSpaces);
+
+        return "{$verb} {$distance} ، {$free} مكان متاح متوفر";
+    }
+
+    /**
+     * Suggested arrival times shown as tappable choices. Each entry is a
+     * concrete {@see Carbon} instant so no fuzzy parsing is needed when the
+     * user taps it — the payload simply carries its unix timestamp.
+     *
+     * @return array<int, array{label: string, at: Carbon}>
+     */
+    private function timePresets(): array
+    {
+        $now = now();
+
+        return [
+            ['label' => '⏱️ بعد ساعة',     'at' => $now->copy()->addHour()],
+            ['label' => '⏱️ بعد ساعتين',   'at' => $now->copy()->addHours(2)],
+            ['label' => '🌅 غداً ٨ صباحاً', 'at' => $now->copy()->addDay()->setTime(8, 0)],
+            ['label' => '🌙 غداً ٦ مساءً',  'at' => $now->copy()->addDay()->setTime(18, 0)],
+        ];
+    }
+
+    /**
+     * Resolve the user's reply into a concrete future arrival time.
+     *
+     * Accepts either a tapped preset (payload `when:<unix-ts>`) or a typed
+     * 12-hour time. The hour is 1–12 and the period is an Arabic/English
+     * word: "٣ العصر" → 3 PM, "٣ الصبح" → 3 AM, "٨:٣٠ مساءً غداً" → 20:30
+     * tomorrow. When no period is given, the next future occurrence of that
+     * hour (AM or PM) is chosen. Returns null when it can't be understood
+     * or falls outside the allowed window.
+     */
+    private function parseSchedule(string $message): ?Carbon
+    {
+        $raw = trim($message);
+
+        // Tapped preset → exact instant carried in the payload.
+        if (str_starts_with(mb_strtolower($raw), self::TIME_PREFIX)) {
+            $ts = (int) Str::after($raw, self::TIME_PREFIX);
+            return $ts > 0 ? $this->validateSchedule(Carbon::createFromTimestamp($ts)) : null;
+        }
+
+        $text = trim(mb_strtolower(DigitNormalizer::toAscii($raw)));
+
+        // A "tomorrow" word may sit at either end ("غداً ٨ صباحاً" / "٨ صباحاً غداً").
+        $tomorrow = false;
+        foreach (['غداً', 'غدًا', 'غدا', 'بكرة', 'بكره', 'tomorrow'] as $word) {
+            if (str_starts_with($text, $word)) {
+                $tomorrow = true;
+                $text     = trim(mb_substr($text, mb_strlen($word)));
+                break;
+            }
+            if (str_ends_with($text, $word)) {
+                $tomorrow = true;
+                $text     = trim(mb_substr($text, 0, -mb_strlen($word)));
+                break;
+            }
+        }
+
+        if (!preg_match('/^(\d{1,2})(?:[:.]\s*(\d{2}))?\s*(.*)$/u', $text, $m)) {
+            return null;
+        }
+
+        $hour   = (int) $m[1];
+        $minute = ($m[2] ?? '') !== '' ? (int) $m[2] : 0;
+        $period = trim($m[3] ?? '');
+
+        if ($minute > 59) {
+            return null;
+        }
+
+        $meridiem = $this->detectMeridiem($period);
+        if ($meridiem === null) {
+            return null; // unrecognised trailing text
+        }
+
+        // Explicit AM/PM → 12-hour clock (hour must be 1–12).
+        if ($meridiem !== '') {
+            if ($hour < 1 || $hour > 12) {
+                return null;
+            }
+            $h24    = $meridiem === 'am' ? $hour % 12 : ($hour % 12) + 12;
+            $target = ($tomorrow ? now()->addDay() : now())->setTime($h24, $minute, 0);
+            if (!$tomorrow && $target->lte(now())) {
+                $target->addDay();
+            }
+            return $this->validateSchedule($target);
+        }
+
+        // No period word. A 13–23 value is an unambiguous 24-hour time.
+        if ($hour > 12) {
+            if ($hour > 23) {
+                return null;
+            }
+            $target = ($tomorrow ? now()->addDay() : now())->setTime($hour, $minute, 0);
+            if (!$tomorrow && $target->lte(now())) {
+                $target->addDay();
+            }
+            return $this->validateSchedule($target);
+        }
+
+        // Ambiguous 12-hour hour (1–12) → next future occurrence.
+        return $this->nextOccurrence($hour, $minute, $tomorrow);
+    }
+
+    /**
+     * Classify a trailing period word as morning or evening.
+     *
+     * @return 'am'|'pm'|''|null  '' when no word was given, null when the
+     *         word is present but unrecognised.
+     */
+    private function detectMeridiem(string $period): ?string
+    {
+        if ($period === '') {
+            return '';
+        }
+
+        $am = ['ص', 'صباح', 'صباحا', 'صباحاً', 'الصبح', 'صبحا', 'فجر', 'فجرا', 'فجراً', 'الفجر', 'am', 'a'];
+        $pm = ['م', 'مساء', 'مساءا', 'مساءً', 'المساء', 'عصر', 'عصرا', 'عصراً', 'العصر',
+               'ظهر', 'ظهرا', 'ظهراً', 'الظهر', 'بعد الظهر', 'الليل', 'ليلا', 'ليلاً',
+               'مغرب', 'المغرب', 'pm', 'p'];
+
+        if (in_array($period, $am, true)) {
+            return 'am';
+        }
+        if (in_array($period, $pm, true)) {
+            return 'pm';
+        }
+        return null;
+    }
+
+    /**
+     * Earliest future instant matching a 12-hour hour with no stated
+     * period — considers both the AM and PM reading (today, then tomorrow,
+     * or only tomorrow when the user said "غداً").
+     */
+    private function nextOccurrence(int $hour, int $minute, bool $tomorrow): ?Carbon
+    {
+        $base = $hour % 12; // 12 → 0
+        $best = null;
+
+        foreach (($tomorrow ? [1] : [0, 1]) as $dayOffset) {
+            foreach ([$base, $base + 12] as $h24) {
+                $candidate = now()->addDays($dayOffset)->setTime($h24, $minute, 0);
+                if ($candidate->isFuture() && ($best === null || $candidate->lt($best))) {
+                    $best = $candidate;
+                }
+            }
+        }
+
+        return $best ? $this->validateSchedule($best) : null;
+    }
+
+    /**
+     * Guard the arrival time to a sane window: strictly in the future and
+     * no further than {@see self::MAX_SCHEDULE_DAYS} ahead.
+     */
+    private function validateSchedule(Carbon $target): ?Carbon
+    {
+        if ($target->lte(now()) || $target->gt(now()->addDays(self::MAX_SCHEDULE_DAYS))) {
+            return null;
+        }
+
+        return $target;
+    }
+
+    /**
+     * Human-friendly arrival label in the app timezone, e.g.
+     * "اليوم ١٧:٣٠", "غداً ٠٩:٠٠", or "٢٠٢٦/٠٦/٢٥ ١٤:٠٠".
+     */
+    private function formatSchedule(\DateTimeInterface $when): string
+    {
+        $when = Carbon::instance($when)->setTimezone(config('app.timezone'));
+        $time = $when->format('H:i');
+
+        $label = match (true) {
+            $when->isToday()    => "اليوم {$time}",
+            $when->isTomorrow() => "غداً {$time}",
+            default             => $when->format('Y/m/d') . " {$time}",
+        };
+
+        return DigitNormalizer::toArabic($label);
     }
 
     /**

@@ -8,6 +8,7 @@ use App\Models\Reserve;
 use App\Models\User;
 use App\Services\Payments\PaymentService;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -27,6 +28,13 @@ class ReservationService
      */
     public const PRE_BOOKING_HOLD_MINUTES = 240;
 
+    /**
+     * When a pre-booking carries an explicit arrival time, the hold stays
+     * valid until that time plus this grace window — covering a customer
+     * who shows up a little late without the sweep releasing their slot.
+     */
+    public const PRE_BOOKING_GRACE_MINUTES = 60;
+
     public function __construct(
         private readonly PaymentService $payments,
     ) {}
@@ -40,12 +48,20 @@ class ReservationService
      * the TTL elapses (→ EXPIRED, slot refunded), or the customer cancels
      * (→ CANCELLED, slot refunded).
      *
+     * When $scheduledAt is supplied (pre-booking for a future arrival) it is
+     * recorded on the reservation and the hold window is anchored to that
+     * time rather than a fixed offset from now.
+     *
      * @throws RuntimeException if the park is full or user already holds a
      *                          pending reservation at this park.
      */
-    public function reserve(User $user, Park $park, bool $preBooking = false): Reserve
-    {
-        return DB::transaction(function () use ($user, $park, $preBooking) {
+    public function reserve(
+        User $user,
+        Park $park,
+        bool $preBooking = false,
+        ?\DateTimeInterface $scheduledAt = null,
+    ): Reserve {
+        return DB::transaction(function () use ($user, $park, $preBooking, $scheduledAt) {
             // Lock the park row to serialize free_spaces decrement.
             $locked = Park::whereKey($park->id)->lockForUpdate()->firstOrFail();
 
@@ -67,9 +83,17 @@ class ReservationService
 
             $locked->decrement('free_spaces');
 
-            $holdMinutes = $preBooking
-                ? self::PRE_BOOKING_HOLD_MINUTES
-                : self::HOLD_MINUTES;
+            // A scheduled pre-booking is only meaningful when pre-booking.
+            $scheduled = $preBooking ? $scheduledAt : null;
+
+            if ($scheduled !== null) {
+                $expiresAt = Carbon::instance($scheduled)
+                    ->addMinutes(self::PRE_BOOKING_GRACE_MINUTES);
+            } else {
+                $expiresAt = now()->addMinutes(
+                    $preBooking ? self::PRE_BOOKING_HOLD_MINUTES : self::HOLD_MINUTES
+                );
+            }
 
             return Reserve::create([
                 'user_id'        => $user->id,
@@ -77,7 +101,8 @@ class ReservationService
                 'status'         => Reserve::STATUS_START,
                 'booking_code'   => Reserve::generateBookingCodeForPark($locked->id),
                 'is_pre_booking' => $preBooking,
-                'expires_at'     => now()->addMinutes($holdMinutes),
+                'scheduled_at'   => $scheduled,
+                'expires_at'     => $expiresAt,
             ]);
         });
     }

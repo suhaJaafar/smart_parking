@@ -102,7 +102,7 @@ class MenuRenderer
             ? $reserve->expires_at->setTimezone(config('app.timezone'))->format('H:i')
             : '—';
 
-        return "🅿️ *حجز فعّال:* {$reserve->park->name}\n"
+        return "�️ *حجز فعّال:* {$reserve->park->name}\n"
              . "⏰ صالح حتى الساعة {$expires}\n"
              . "_لإلغاء الحجز أرسل: *الغاء حجزي*_";
     }

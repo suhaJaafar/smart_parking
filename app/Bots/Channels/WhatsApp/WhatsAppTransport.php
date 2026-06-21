@@ -5,6 +5,7 @@ namespace App\Bots\Channels\WhatsApp;
 use App\Bots\Contracts\BotSession;
 use App\Bots\Contracts\BotTransport;
 use App\Bots\Dto\OutboundReply;
+use App\Bots\Support\BidiText;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -174,10 +175,45 @@ class WhatsAppTransport implements BotTransport
     }
 
     /**
+     * Pin every outbound message body to a right-to-left layout, regardless
+     * of the interactive widget it travels in.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function forceRtl(array $payload): array
+    {
+        if (isset($payload['text']['body']) && is_string($payload['text']['body'])) {
+            $payload['text']['body'] = BidiText::rtl($this->flattenLinks($payload['text']['body']));
+        }
+        if (isset($payload['interactive']['body']['text']) && is_string($payload['interactive']['body']['text'])) {
+            $payload['interactive']['body']['text'] = BidiText::rtl($this->flattenLinks($payload['interactive']['body']['text']));
+        }
+
+        return $payload;
+    }
+
+    /**
+     * WhatsApp text cannot mask a URL behind a label the way Telegram's
+     * Markdown can, so a `[label](url)` link would render literally. Flatten
+     * any such links to "label: url" — the bare URL stays auto-clickable.
+     */
+    private function flattenLinks(string $text): string
+    {
+        return preg_replace(
+            '/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/u',
+            '$1: $2',
+            $text,
+        ) ?? $text;
+    }
+
+    /**
      * @param array<string, mixed> $payload
      */
     private function dispatch(string $to, array $payload): bool
     {
+        $payload = $this->forceRtl($payload);
+
         $phoneNumberId = config('services.whatsapp.phone_number_id');
         $accessToken   = config('services.whatsapp.access_token');
         $apiVersion    = config('services.whatsapp.api_version', 'v18.0');
