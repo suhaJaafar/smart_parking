@@ -23,42 +23,35 @@ use Throwable;
 /**
  * Flow for a SPACE_OWNER to bring a car INTO their park.
  *
- * Steps: select_reservation → (select_car | plate) → done.
- *   • select_reservation -> the customers who currently hold a pending
- *                           reservation at this park are listed as tappable
- *                           choices. The owner just taps the arriving
- *                           customer — no booking code to type. Typing a
- *                           booking code still works as a fallback.
- *   • select_car         -> the chosen customer's known cars are shown as
- *                           tappable choices so a RETURNING car never has to
- *                           be retyped. Tapping "➕ سيارة جديدة" (or typing a
- *                           plate) falls through to the `plate` step.
- *   • plate              -> "BG-12345" (prefix-number) for a first-time car.
+ * Steps: select_car → (plate) → done.
+ *   • select_car -> every car with a pending reservation at this park is
+ *                   listed as a tappable choice, labelled by plate (and the
+ *                   customer's name). The owner taps the arriving vehicle
+ *                   directly — there is no customer to pick and no booking
+ *                   code to type. The matching reservation (and therefore the
+ *                   customer) is resolved in the backend from the tapped
+ *                   choice. Typing a booking code still works as a fallback.
+ *   • plate      -> "BG-12345" (prefix-number), used only when the arriving
+ *                   customer has no car on file yet.
  *
- * The car is found-or-created by plate when typed, linked to the
- * SPACE_OWNER's park, and the matching pending reservation is marked
- * active.
+ * On selection the car is parked, the matching pending reservation is marked
+ * ACTIVE, and the customer is notified.
  */
 class CarEntryFlow
 {
     public const FLOW = 'car_enter';
     private const TTL_MINUTES = 10;
 
-    /** Payload prefix for a "select this pending reservation" choice. */
-    private const RESERVATION_OPTION_PREFIX = 'rsv:';
+    /**
+     * Payload prefix for an "enter this arriving car" choice. The full
+     * payload is "enter:<reserveId>" — kept short so it stays within
+     * Telegram's 64-byte callback_data limit. The exact car is resolved in
+     * the backend from the reservation's customer.
+     */
+    private const ENTRY_OPTION_PREFIX = 'enter:';
 
-    /** Payload prefix for a "select this known car" choice. */
-    private const CAR_OPTION_PREFIX = 'car:';
-
-    /** Payload / words that mean "this car isn't in the list, let me type it". */
-    private const NEW_CAR_OPTION = 'car:new';
-    private const NEW_CAR_WORDS  = ['جديدة', 'سيارة جديدة', 'new', 'new car'];
-
-    /** Cars shown per customer — WhatsApp lists allow at most 10 rows. */
-    private const MAX_CAR_CHOICES = 9;
-
-    /** Pending reservations shown — WhatsApp lists allow at most 10 rows. */
-    private const MAX_RESERVATION_CHOICES = 10;
+    /** Arriving cars shown — WhatsApp lists allow at most 10 rows. */
+    private const MAX_ARRIVING_CARS = 10;
 
     public function __construct(
         private readonly CarService $carService,
@@ -82,10 +75,9 @@ class CarEntryFlow
         }
 
         return match ($session->getStep()) {
-            'select_reservation' => $this->afterReservationChoice($session, $message),
-            'select_car'         => $this->afterCarChoice($session, $message),
-            'plate'              => $this->afterPlate($session, $message),
-            default              => OutboundReply::empty(),
+            'select_car' => $this->afterCarChoice($session, $message),
+            'plate'      => $this->afterPlate($session, $message),
+            default      => OutboundReply::empty(),
         };
     }
 
@@ -108,51 +100,53 @@ class CarEntryFlow
 
         $session->update([
             'flow'       => self::FLOW,
-            'step'       => 'select_reservation',
+            'step'       => 'select_car',
             'data'       => ['park_id' => $park->id],
             'expires_at' => now()->addMinutes(self::TTL_MINUTES),
         ]);
 
-        return $this->presentReservations($session, $park);
+        return $this->presentArrivingCars($session, $park);
     }
 
     /**
-     * List the customers who currently hold a pending reservation at this
-     * park as tappable choices. The owner picks the arriving customer
-     * instead of typing a booking code.
+     * List every car with a pending reservation at this park as tappable
+     * choices, each labelled by plate (and the customer's name). The owner
+     * taps the arriving vehicle directly — no customer step. The reservation
+     * (and its customer) is resolved in the backend from the tapped choice.
      */
-    private function presentReservations(BotSession $session, Park $park): OutboundReply
+    private function presentArrivingCars(BotSession $session, Park $park): OutboundReply
     {
-        $pending = $this->reservations->pendingForPark($park, self::MAX_RESERVATION_CHOICES);
+        $pending = $this->reservations->pendingForPark($park, self::MAX_ARRIVING_CARS);
 
         if ($pending->isEmpty()) {
             $session->reset();
             return OutboundReply::text(
-                "ℹ️ لا توجد حجوزات معلّقة حالياً في *{$park->name}*.\n\n"
-                . "تظهر هنا الحجوزات التي لم تدخل سياراتها بعد. اطلب من الزبون إنشاء حجز أولاً."
+                "ℹ️ لا توجد سيارات بانتظار الدخول حالياً في *{$park->name}*.\n\n"
+                . "تظهر هنا سيارات الحجوزات التي لم تدخل بعد. اطلب من الزبون إنشاء حجز أولاً."
             );
         }
 
         $options = $pending->map(
-            fn (Reserve $reserve): array => $this->reservationOption($reserve)
+            fn (Reserve $reserve): array => $this->arrivingCarOption($reserve)
         )->all();
 
         return OutboundReply::buttons(
-            body: "🅿️ *{$park->name}*\n\nاختر الزبون الواصل لإدخال سيارته:",
+            body: "🅿️ *{$park->name}*\n\nاختر السيارة الواصلة لإدخالها:",
             options: $options,
-            listButton: 'اختر الحجز',
+            listButton: 'اختر السيارة',
         );
     }
 
     /**
-     * Build one tappable picker row for a pending reservation. Surfaces the
-     * customer's most recent car plate (read from the eager-loaded `cars`
-     * relation, newest first) so the owner can match the physically-
-     * arriving vehicle at a glance.
+     * Build one tappable row for a pending reservation, labelled by the
+     * customer's most recent car (read from the eager-loaded `cars` relation,
+     * newest first). The payload carries only the reservation id (to stay
+     * within Telegram's 64-byte callback limit); the car is re-resolved in
+     * the backend when tapped.
      *
      * @return array{id: string, title: string, description: string}
      */
-    private function reservationOption(Reserve $reserve): array
+    private function arrivingCarOption(Reserve $reserve): array
     {
         $customer = $reserve->user;
         $name     = $customer?->name ?: 'زبون';
@@ -160,23 +154,25 @@ class CarEntryFlow
 
         $title = $car
             ? "🚗 {$car->plate_prefix}-{$car->car_number} — {$name}"
-            : "👤 {$name}";
+            : "👤 {$name} — بدون سيارة مسجّلة";
 
-        $description = ($reserve->is_pre_booking ? '💳 حجز مسبق • ' : '')
-            . "رمز: {$reserve->booking_code}";
+        $badge       = $reserve->is_pre_booking ? '💳 حجز مسبق • ' : '';
+        $description = $car
+            ? $badge . "رمز: {$reserve->booking_code}"
+            : $badge . "أدخل اللوحة بعد الاختيار";
 
         return [
-            'id'          => self::RESERVATION_OPTION_PREFIX . $reserve->id,
+            'id'          => self::ENTRY_OPTION_PREFIX . $reserve->id,
             'title'       => $title,
             'description' => $description,
         ];
     }
 
     /**
-     * Owner tapped a pending reservation (or typed a booking code as a
-     * fallback). Resolve the customer and move on to picking the car.
+     * Owner tapped an arriving car (or typed a booking code as a fallback).
+     * Resolve the reservation/customer in the backend and enter the car.
      */
-    private function afterReservationChoice(BotSession $session, string $message): OutboundReply
+    private function afterCarChoice(BotSession $session, string $message): OutboundReply
     {
         $park = Park::find($session->getData()['park_id'] ?? null);
         if (!$park) {
@@ -187,134 +183,72 @@ class CarEntryFlow
         $raw   = trim($message);
         $lower = mb_strtolower($raw);
 
-        $reserve = null;
+        // A tapped arriving-car choice — the happy path.
+        if (str_starts_with($lower, self::ENTRY_OPTION_PREFIX)) {
+            return $this->enterFromChoice(
+                $session,
+                $park,
+                Str::after($raw, self::ENTRY_OPTION_PREFIX),
+            );
+        }
 
-        if (str_starts_with($lower, self::RESERVATION_OPTION_PREFIX)) {
-            // A tapped list choice.
-            $reserveId = Str::after($raw, self::RESERVATION_OPTION_PREFIX);
-            $reserve   = Reserve::where('park_id', $park->id)
-                ->whereKey($reserveId)
-                ->where('status', Reserve::STATUS_START)
-                ->with('user')
-                ->first();
-        } else {
-            // Fallback: owner typed the booking code by hand.
-            $code = DigitNormalizer::toAscii($raw);
-            if (preg_match('/^\d{3,4}$/', $code)) {
-                $reserve = $this->reservations->findPendingByBookingCode($park, $code);
+        // Fallback: owner typed the booking code by hand. We can't know which
+        // car is arriving from a code alone, so we ask for the plate.
+        $code = DigitNormalizer::toAscii($raw);
+        if (preg_match('/^\d{3,4}$/', $code)) {
+            $reserve = $this->reservations->findPendingByBookingCode($park, $code);
+            if ($reserve && $reserve->user) {
+                $this->merge($session, ['booking_code' => $reserve->booking_code], 'plate');
+                return OutboundReply::text(
+                    Prompt::ask("🚗 أرسل لوحة السيارة بالشكل: PREFIX-NUMBER\nمثال: BG-12345")
+                );
             }
         }
 
-        if (!$reserve) {
+        return OutboundReply::text(
+            Prompt::ask("⚠️ اختر سيارة من القائمة، أو أرسل *booking code* الصحيح (3 أو 4 أرقام).")
+        );
+    }
+
+    /**
+     * Resolve a tapped "enter:<reserveId>" payload to a concrete pending
+     * reservation and the customer's most recent car, then complete the
+     * entry. Falls through to the plate prompt when the customer has no car
+     * on file yet.
+     */
+    private function enterFromChoice(BotSession $session, Park $park, string $reserveId): OutboundReply
+    {
+        if (!Str::isUuid($reserveId)) {
             return OutboundReply::text(
-                Prompt::ask("⚠️ اختر حجزاً من القائمة، أو أرسل *booking code* الصحيح (3 أو 4 أرقام).")
+                Prompt::ask("⚠️ اختر سيارة من القائمة.")
+            );
+        }
+
+        $reserve = Reserve::where('park_id', $park->id)
+            ->whereKey($reserveId)
+            ->where('status', Reserve::STATUS_START)
+            ->with(['user.cars' => fn ($query) => $query->latest()])
+            ->first();
+
+        if (!$reserve || !$reserve->user) {
+            return OutboundReply::text(
+                Prompt::ask("⚠️ لم يعد هذا الحجز متاحاً. اختر سيارة أخرى من القائمة.")
             );
         }
 
         $carOwner = $reserve->user;
-        if (!$carOwner) {
-            $session->reset();
-            return OutboundReply::text("❌ لم يتم العثور على الزبون المرتبط بهذا الحجز.");
-        }
+        $car      = $carOwner->cars->first();
 
-        // Remember the validated booking code so later steps re-resolve the
-        // very same pending reservation (single source of truth).
-        $this->merge($session, ['booking_code' => $reserve->booking_code], 'select_reservation');
-
-        return $this->presentCarChoices($session, $park, $carOwner);
-    }
-
-    /**
-     * Show the customer's previously-seen cars as tappable choices. A
-     * returning car is selected, never retyped. Falls back to the plate
-     * prompt when the customer has no cars on file yet.
-     */
-    private function presentCarChoices(BotSession $session, Park $park, User $carOwner): OutboundReply
-    {
-        $cars = $carOwner->cars()
-            ->latest()
-            ->take(self::MAX_CAR_CHOICES)
-            ->get();
-
-        if ($cars->isEmpty()) {
-            $this->merge($session, [], 'plate');
+        // No car on file → ask for the plate, remembering which reservation
+        // we're fulfilling so the follow-up plate step re-resolves it.
+        if (!$car) {
+            $this->merge($session, ['booking_code' => $reserve->booking_code], 'plate');
             return OutboundReply::text(
                 Prompt::ask("🚗 أرسل لوحة السيارة بالشكل: PREFIX-NUMBER\nمثال: BG-12345")
             );
         }
 
-        $options = [];
-        foreach ($cars as $car) {
-            $option = [
-                'id'    => self::CAR_OPTION_PREFIX . $car->id,
-                'title' => "🚗 {$car->plate_prefix}-{$car->car_number}",
-            ];
-            if (!empty($car->model)) {
-                $option['description'] = (string) $car->model;
-            }
-            $options[] = $option;
-        }
-        $options[] = ['id' => self::NEW_CAR_OPTION, 'title' => '➕ سيارة جديدة'];
-
-        $this->merge($session, [], 'select_car');
-
-        $customerName = $carOwner->name ?: 'الزبون';
-
-        return OutboundReply::buttons(
-            body: "👤 الزبون: *{$customerName}*\n🅿️ الموقف: *{$park->name}*\n\n"
-                . "اختر سيارة الزبون من القائمة، أو *سيارة جديدة* لإدخال لوحة جديدة:",
-            options: $options,
-            listButton: 'اختر السيارة',
-        );
-    }
-
-    /**
-     * Owner tapped a car choice (or typed a fallback). Resolve it to a
-     * concrete car and complete the entry.
-     */
-    private function afterCarChoice(BotSession $session, string $message): OutboundReply
-    {
-        $context = $this->context($session);
-        if ($context === null) {
-            $session->reset();
-            return OutboundReply::text("❌ انتهت صلاحية الحجز. ابدأ العملية من جديد.");
-        }
-        [$park, $carOwner] = $context;
-
-        $raw   = trim($message);
-        $lower = mb_strtolower($raw);
-
-        // "New car" — drop to the plate prompt.
-        if ($lower === self::NEW_CAR_OPTION || in_array($lower, self::NEW_CAR_WORDS, true)) {
-            $this->merge($session, [], 'plate');
-            return OutboundReply::text(
-                Prompt::ask("🚗 أرسل لوحة السيارة بالشكل: PREFIX-NUMBER\nمثال: BG-12345")
-            );
-        }
-
-        // A known-car selection.
-        if (str_starts_with($lower, self::CAR_OPTION_PREFIX)) {
-            $carId = Str::after($raw, self::CAR_OPTION_PREFIX);
-            $car   = $carOwner->cars()->whereKey($carId)->first();
-
-            if (!$car) {
-                return OutboundReply::text(
-                    Prompt::ask("⚠️ لم أتعرف على هذه السيارة. اختر من القائمة أو أرسل *سيارة جديدة*.")
-                );
-            }
-
-            return $this->completeEntry($session, $park, $carOwner, $car);
-        }
-
-        // Fallback: owner typed a plate directly instead of tapping.
-        $plate = CarPlate::fromString($raw);
-        if ($plate !== null) {
-            return $this->enterWithPlate($session, $park, $carOwner, $plate);
-        }
-
-        return OutboundReply::text(
-            Prompt::ask("⚠️ اختر سيارة من القائمة، أو أرسل *سيارة جديدة* لإدخال لوحة جديدة.")
-        );
+        return $this->completeEntry($session, $park, $carOwner, $car);
     }
 
     /**

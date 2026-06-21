@@ -37,6 +37,13 @@ class TelegramSession extends Model implements BotSession
         'expires_at' => 'datetime',
     ];
 
+    /**
+     * Transient, per-request display name reported by Telegram. Not a
+     * column and never persisted — only read by onboarding within the
+     * same request that set it.
+     */
+    protected ?string $profileName = null;
+
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
@@ -69,6 +76,16 @@ class TelegramSession extends Model implements BotSession
     public function getRecipient(): string
     {
         return (string) $this->chat_id;
+    }
+
+    public function getProfileName(): ?string
+    {
+        return $this->profileName;
+    }
+
+    public function setProfileName(?string $name): void
+    {
+        $this->profileName = $name;
     }
 
     public function getFlow(): ?string

@@ -19,7 +19,7 @@ class WhatsAppInboundParser
     /**
      * Iterate every inbound message from the webhook body.
      *
-     * @return \Generator<int, array{from: string, type: string, text: string}>
+     * @return \Generator<int, array{from: string, type: string, text: string, name: ?string}>
      */
     public function messages(array $body): \Generator
     {
@@ -36,6 +36,10 @@ class WhatsAppInboundParser
                     continue;
                 }
 
+                // Map wa_id → profile name so each message can adopt the
+                // sender's WhatsApp display name.
+                $names = $this->extractNames($value['contacts'] ?? []);
+
                 foreach ($value['messages'] ?? [] as $message) {
                     $from = $message['from'] ?? null;
                     $type = $message['type'] ?? 'text';
@@ -46,11 +50,35 @@ class WhatsAppInboundParser
                             'from' => (string) $from,
                             'type' => $this->normaliseType($type),
                             'text' => $text,
+                            'name' => $names[(string) $from] ?? null,
                         ];
                     }
                 }
             }
         }
+    }
+
+    /**
+     * Build a wa_id → display-name lookup from the webhook's `contacts`
+     * array. Empty names are dropped so callers fall back cleanly.
+     *
+     * @param array<int, array<string, mixed>> $contacts
+     * @return array<string, string>
+     */
+    private function extractNames(array $contacts): array
+    {
+        $names = [];
+
+        foreach ($contacts as $contact) {
+            $waId = (string) ($contact['wa_id'] ?? '');
+            $name = trim((string) ($contact['profile']['name'] ?? ''));
+
+            if ($waId !== '' && $name !== '') {
+                $names[$waId] = $name;
+            }
+        }
+
+        return $names;
     }
 
     /**

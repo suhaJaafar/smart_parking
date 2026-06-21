@@ -59,6 +59,7 @@ class WhatsAppController
 
         foreach ($this->parser->messages($body) as $msg) {
             $session = $this->parser->resolveSession($msg['from']);
+            $session->setProfileName($msg['name'] ?? null);
 
             $reply = $this->engine->handle(
                 $session,

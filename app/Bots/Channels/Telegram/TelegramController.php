@@ -47,6 +47,7 @@ class TelegramController
         }
 
         $session = $this->parser->resolveSession($msg['chat_id']);
+        $session->setProfileName($msg['name'] ?? null);
 
         $reply = $this->engine->handle(
             $session,
