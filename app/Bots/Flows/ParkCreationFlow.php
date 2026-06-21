@@ -93,7 +93,7 @@ class ParkCreationFlow
         }
 
         $this->merge($session, ['name' => $name], 'capacity');
-        return OutboundReply::text(Prompt::ask("🅿️ ما السعة الكلية؟ (رقم صحيح موجب)"));
+        return OutboundReply::text(Prompt::ask("🔢 ما السعة الكلية؟ (رقم صحيح موجب)"));
     }
 
     private function askLocation(BotSession $session, string $message): OutboundReply

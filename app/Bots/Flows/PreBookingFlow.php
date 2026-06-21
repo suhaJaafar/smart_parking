@@ -209,9 +209,9 @@ class PreBookingFlow
     }
 
     /**
-     * Present a few sensible arrival-time presets as tappable choices,
-     * while still accepting a free-typed 12-hour time
-     * (e.g. "٣ العصر" or "٨ صباحاً غداً").
+     * Present the arrival time as a tap-to-pick list of concrete upcoming
+     * instants (a lightweight in-chat time picker), while still accepting a
+     * free-typed 12-hour time (e.g. "٣ العصر" or "٨ صباحاً غداً").
      */
     private function askTime(Park $park): OutboundReply
     {
@@ -225,12 +225,12 @@ class PreBookingFlow
         }
 
         return OutboundReply::buttons(
-            body: "🅿️ *{$park->name}*\n\n"
+            body: "📍 *{$park->name}*\n\n"
                 . "🕒 متى ستصل إلى الموقف؟\n"
-                . "اختر وقتاً من القائمة، أو اكتب الوقت.\n"
-                . "_مثال: ٣ العصر  أو  ٨ صباحاً غداً_",
+                . "اختر وقتاً من القائمة 👇، أو اكتبه بنفسك.\n"
+                . "_مثال: ٣ العصر او ٣:٣٠ العصر او  ٨ صباحاً غداً_",
             options: $options,
-            listButton: 'اختر الوقت',
+            listButton: '🕒 اختر الوقت',
         );
     }
 
@@ -250,7 +250,7 @@ class PreBookingFlow
         if ($scheduledAt === null) {
             return OutboundReply::text(Prompt::ask(
                 "⚠️ وقت غير صالح. اختر وقتاً من القائمة، أو اكتبه:\n"
-                . "_٣ العصر  أو  ٨ صباحاً غداً_ (خلال ٧ أيام)"
+                . "_٣ العصر او ٣:٣٠ العصر او  ٨ صباحاً غداً_ (خلال ٧ أيام)"
             ));
         }
 
@@ -292,8 +292,8 @@ class PreBookingFlow
         return OutboundReply::text(
             "✅ تم حجز مكان لك مسبقاً في *{$choice['name']}*\n\n"
             . "🕒 موعد وصولك: *{$schedule}*\n"
-            . "🗺️ الاتجاهات: {$mapsUrl}\n"
-            . "🔑 *booking code:* `{$reserve->booking_code}`\n\n"
+            . "🗺️ للاتجاهات: [اضغط هنا]({$mapsUrl})\n"
+            . "🔑 *رمز الحجز:* `{$reserve->booking_code}`\n\n"
             . "💳 لإتمام الحجز، ادفع الآن بإرسال *تم الحجز*\n"
             . "_أو أرسل *0* للإلغاء._"
         );
@@ -336,11 +336,11 @@ class PreBookingFlow
 
         return OutboundReply::text(
             "💳 *الدفع المسبق لحجزك*\n\n"
-            . "🅿️ الموقف: *{$reserve->park->name}*\n"
+            . "📍 الموقف: *{$reserve->park->name}*\n"
             . ($schedule ? "🕒 موعد الوصول: *{$schedule}*\n" : '')
             . "💰 المبلغ: *{$amount}*\n"
-            . "🔑 booking code: `{$reserve->booking_code}`\n\n"
-            . "لإتمام الدفع الآن:\n{$url}\n\n"
+            . "🔑 رمز الحجز: `{$reserve->booking_code}`\n\n"
+            . "💳 لإتمام عملية الدفع: [اضغط هنا]({$url})\n\n"
             . "_بعد الدفع، أعطِ رمز الحجز لصاحب الموقف عند وصولك._"
         );
     }
@@ -430,6 +430,7 @@ class PreBookingFlow
             ['label' => '⏱️ بعد ساعة',     'at' => $now->copy()->addHour()],
             ['label' => '⏱️ بعد ساعتين',   'at' => $now->copy()->addHours(2)],
             ['label' => '🌅 غداً ٨ صباحاً', 'at' => $now->copy()->addDay()->setTime(8, 0)],
+            ['label' => '🌙 غداً ٦ مساءً',  'at' => $now->copy()->addDay()->setTime(18, 0)],
         ];
     }
 

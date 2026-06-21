@@ -131,7 +131,7 @@ class CarEntryFlow
         )->all();
 
         return OutboundReply::buttons(
-            body: "🅿️ *{$park->name}*\n\nاختر السيارة الواصلة لإدخالها:",
+            body: "📍 *{$park->name}*\n\nاختر السيارة الواصلة لإدخالها:",
             options: $options,
             listButton: 'اختر السيارة',
         );
@@ -200,7 +200,7 @@ class CarEntryFlow
             if ($reserve && $reserve->user) {
                 $this->merge($session, ['booking_code' => $reserve->booking_code], 'plate');
                 return OutboundReply::text(
-                    Prompt::ask("🚗 أرسل لوحة السيارة بالشكل: PREFIX-NUMBER\nمثال: BG-12345")
+                    Prompt::ask("🚗 أرسل لوحة السيارة \nمثال: BG-12345")
                 );
             }
         }
@@ -244,7 +244,7 @@ class CarEntryFlow
         if (!$car) {
             $this->merge($session, ['booking_code' => $reserve->booking_code], 'plate');
             return OutboundReply::text(
-                Prompt::ask("🚗 أرسل لوحة السيارة بالشكل: PREFIX-NUMBER\nمثال: BG-12345")
+                Prompt::ask("🚗 أرسل لوحة السيارة \nمثال: BG-12345")
             );
         }
 
@@ -259,7 +259,7 @@ class CarEntryFlow
         $plate = CarPlate::fromString($message);
         if ($plate === null) {
             return OutboundReply::text(
-                Prompt::ask("⚠️ صيغة اللوحة غير صحيحة. أرسل: PREFIX-NUMBER (مثال: BG-12345)")
+                Prompt::ask("⚠️ صيغة اللوحة غير صحيحة. (مثال: BG-12345)")
             );
         }
 
@@ -373,7 +373,7 @@ class CarEntryFlow
             : "✅ تم تسجيل دخول سيارتك إلى الموقف.";
 
         $body = $headline . "\n\n"
-              . "🅿️ الموقف: {$park->name}\n"
+              . "📍 الموقف: {$park->name}\n"
               . "🚗 اللوحة: {$car->plate_prefix}-{$car->car_number}\n"
               . "🕒 وقت الدخول: " . now()->setTimezone(config('app.timezone'))->format('Y-m-d H:i');
 
@@ -388,7 +388,7 @@ class CarEntryFlow
 
             if ($payment && !$payment->isPaid()) {
                 $url = route('payments.redirect', $payment->token);
-                $body .= "\n\n💳 لإتمام الدفع إلكترونياً:\n{$url}\n\nأو يمكنك الدفع نقداً عند الخروج.";
+                $body .= "\n\n💳 لإتمام عملية الدفع إلكترونياً: [اضغط هنا]({$url})\n\nأو يمكنك الدفع نقداً عند الخروج.";
             }
         }
 

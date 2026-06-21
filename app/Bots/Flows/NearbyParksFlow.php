@@ -185,12 +185,12 @@ class NearbyParksFlow
         $mapsUrl = sprintf('https://www.google.com/maps?q=%F,%F', $choice['lat'], $choice['lng']);
 
         // Show the customer the booking code they need to give the owner.
-        $keyLine = "🔑 *booking code:* `{$reserve->booking_code}`\n"
+        $keyLine = "🔑 *رمز الحجز:* `{$reserve->booking_code}`\n"
                  . "_اعطِ هذا الرمز لصاحب الموقف عند وصولك._\n\n";
 
         return OutboundReply::text(
             "✅ تم حجز مكان لك في *{$choice['name']}*\n\n"
-            . "🗺️ الاتجاهات: {$mapsUrl}\n"
+            . "🗺️ للاتجاهات: [اضغط هنا]({$mapsUrl})\n"
             . "⏰ صالح حتّى الساعة {$expires}\n\n"
             . $keyLine
             . "إذا لم تصل قبل ذلك سيتم إلغاء الحجز تلقائياً."
@@ -220,7 +220,7 @@ class NearbyParksFlow
             $message = "🔔 *حجز جديد في موقفك*\n\n"
                      . "الموقف: *{$park->name}*\n"
                      . "الزبون: *{$customerName}*\n"
-                     . "booking code: *`{$reserve->booking_code}`*\n"
+                     . "رمز الحجز: *`{$reserve->booking_code}`*\n"
                      . "صالح حتّى الساعة: {$expires}\n"
                      . "الأماكن المتبقية: *{$park->free_spaces}*\n\n"
                      . "_سيتم إلغاء الحجز تلقائياً إذا لم يصل الزبون في الوقت المحدد._";

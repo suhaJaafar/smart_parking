@@ -5,6 +5,7 @@ namespace App\Bots\Channels\Telegram;
 use App\Bots\Contracts\BotSession;
 use App\Bots\Contracts\BotTransport;
 use App\Bots\Dto\OutboundReply;
+use App\Bots\Support\BidiText;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -135,6 +136,15 @@ class TelegramTransport implements BotTransport
      */
     private function dispatch(string $method, array $payload): bool
     {
+        if (isset($payload['text']) && is_string($payload['text'])) {
+            $payload['text'] = BidiText::rtl($payload['text']);
+        }
+
+        // Suppress the large link-preview card so masked links stay tidy.
+        if ($method === 'sendMessage' && !isset($payload['disable_web_page_preview'])) {
+            $payload['disable_web_page_preview'] = true;
+        }
+
         $token = config('services.telegram.bot_token');
         $base  = config('services.telegram.api_base_url', 'https://api.telegram.org');
 
