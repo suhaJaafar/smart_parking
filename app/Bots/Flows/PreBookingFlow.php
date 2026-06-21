@@ -44,9 +44,6 @@ class PreBookingFlow
     /** Callback payload prefix for a tapped park choice (carries its list number). */
     private const PARK_PREFIX = 'park:';
 
-    /** Callback payload prefix for a tapped time preset (carries a unix ts). */
-    private const TIME_PREFIX = 'when:';
-
     /** How far ahead a pre-booking may be scheduled. */
     private const MAX_SCHEDULE_DAYS = 7;
 
@@ -209,29 +206,19 @@ class PreBookingFlow
     }
 
     /**
-     * Present the arrival time as a tap-to-pick list of concrete upcoming
-     * instants (a lightweight in-chat time picker), while still accepting a
-     * free-typed 12-hour time (e.g. "٣ العصر" or "٨ صباحاً غداً").
+     * Ask the customer for their arrival time. They type a 12-hour time
+     * (e.g. "٣ العصر" or "٨ صباحاً غداً"); {@see self::parseSchedule()}
+     * resolves it to a concrete future instant.
      */
     private function askTime(Park $park): OutboundReply
     {
-        $options = [];
-        foreach ($this->timePresets() as $preset) {
-            $options[] = [
-                'id'          => self::TIME_PREFIX . $preset['at']->timestamp,
-                'title'       => $preset['label'],
-                'description' => $this->formatSchedule($preset['at']),
-            ];
-        }
-
-        return OutboundReply::buttons(
-            body: "📍 *{$park->name}*\n\n"
-                . "🕒 متى ستصل إلى الموقف؟\n"
-                . "اختر وقتاً من القائمة 👇، أو اكتبه بنفسك.\n"
-                . "_مثال: ٣ العصر او ٣:٣٠ العصر او  ٨ صباحاً غداً_",
-            options: $options,
-            listButton: '🕒 اختر الوقت',
-        );
+        return OutboundReply::text(Prompt::ask(
+            "📍 *{$park->name}*\n\n"
+            . "🕒 متى ستصل إلى الموقف؟\n"
+            . "اكتب وقت وصولك في رسالة.\n"
+            . "_أمثلة: ٣ العصر • ٣:٣٠ العصر • ٨ صباحاً غداً_\n\n"
+            . "⏳ مهلة الوصول ١٠ دقائق بعد الوقت المحدد، وبعدها يُلغى الحجز تلقائياً ويمكنك إعادته."
+        ));
     }
 
     /**
@@ -416,30 +403,10 @@ class PreBookingFlow
     }
 
     /**
-     * Suggested arrival times shown as tappable choices. Each entry is a
-     * concrete {@see Carbon} instant so no fuzzy parsing is needed when the
-     * user taps it — the payload simply carries its unix timestamp.
-     *
-     * @return array<int, array{label: string, at: Carbon}>
-     */
-    private function timePresets(): array
-    {
-        $now = now();
-
-        return [
-            ['label' => '⏱️ بعد ساعة',     'at' => $now->copy()->addHour()],
-            ['label' => '⏱️ بعد ساعتين',   'at' => $now->copy()->addHours(2)],
-            ['label' => '🌅 غداً ٨ صباحاً', 'at' => $now->copy()->addDay()->setTime(8, 0)],
-            ['label' => '🌙 غداً ٦ مساءً',  'at' => $now->copy()->addDay()->setTime(18, 0)],
-        ];
-    }
-
-    /**
      * Resolve the user's reply into a concrete future arrival time.
      *
-     * Accepts either a tapped preset (payload `when:<unix-ts>`) or a typed
-     * 12-hour time. The hour is 1–12 and the period is an Arabic/English
-     * word: "٣ العصر" → 3 PM, "٣ الصبح" → 3 AM, "٨:٣٠ مساءً غداً" → 20:30
+     * Accepts a typed 12-hour time. The hour is 1–12 and the period is an
+     * Arabic/English word: "٣ العصر" → 3 PM, "٣ الصبح" → 3 AM, "٨:٣٠ مساءً غداً" → 20:30
      * tomorrow. When no period is given, the next future occurrence of that
      * hour (AM or PM) is chosen. Returns null when it can't be understood
      * or falls outside the allowed window.
@@ -447,12 +414,6 @@ class PreBookingFlow
     private function parseSchedule(string $message): ?Carbon
     {
         $raw = trim($message);
-
-        // Tapped preset → exact instant carried in the payload.
-        if (str_starts_with(mb_strtolower($raw), self::TIME_PREFIX)) {
-            $ts = (int) Str::after($raw, self::TIME_PREFIX);
-            return $ts > 0 ? $this->validateSchedule(Carbon::createFromTimestamp($ts)) : null;
-        }
 
         $text = trim(mb_strtolower(DigitNormalizer::toAscii($raw)));
 
