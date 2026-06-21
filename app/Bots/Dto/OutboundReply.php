@@ -125,4 +125,63 @@ final class OutboundReply
     {
         return $this->type === self::TYPE_EMPTY || trim($this->body) === '' && $this->type === self::TYPE_TEXT;
     }
+
+    /**
+     * Flatten this reply into a JSON-safe array so it can be parked in the
+     * session (e.g. to replay a prompt when the user steps back to edit a
+     * previous answer).
+     *
+     * @return array<string, mixed>
+     */
+    public function toArray(): array
+    {
+        return [
+            'type'       => $this->type,
+            'body'       => $this->body,
+            'ctaText'    => $this->ctaText,
+            'url'        => $this->url,
+            'options'    => $this->options,
+            'listButton' => $this->listButton,
+            'linkButton' => $this->linkButton,
+        ];
+    }
+
+    /**
+     * Rebuild a reply previously flattened with {@see self::toArray()}.
+     *
+     * @param array<string, mixed> $data
+     */
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            type:       (string) ($data['type'] ?? self::TYPE_EMPTY),
+            body:       (string) ($data['body'] ?? ''),
+            ctaText:    $data['ctaText'] ?? null,
+            url:        $data['url'] ?? null,
+            options:    is_array($data['options'] ?? null) ? $data['options'] : [],
+            listButton: $data['listButton'] ?? null,
+            linkButton: is_array($data['linkButton'] ?? null) ? $data['linkButton'] : null,
+        );
+    }
+
+    /**
+     * Return a copy of this reply with extra text appended to the body.
+     * Only meaningful for body-carrying types; others are returned as-is.
+     */
+    public function withAppendedBody(string $extra): self
+    {
+        if ($extra === '' || !in_array($this->type, [self::TYPE_TEXT, self::TYPE_CTA_URL, self::TYPE_BUTTONS], true)) {
+            return $this;
+        }
+
+        return new self(
+            type:       $this->type,
+            body:       $this->body . $extra,
+            ctaText:    $this->ctaText,
+            url:        $this->url,
+            options:    $this->options,
+            listButton: $this->listButton,
+            linkButton: $this->linkButton,
+        );
+    }
 }
