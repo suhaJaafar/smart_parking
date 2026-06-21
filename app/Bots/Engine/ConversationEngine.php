@@ -38,13 +38,27 @@ class ConversationEngine
     public const TYPE_TEXT     = 'text';
     public const TYPE_LOCATION = 'location';
 
-    /** Cancel / back / restart — anything that should drop the user back to the menu. */
+    /** Cancel / restart — anything that should drop the user back to the menu. */
     private const ESCAPE_COMMANDS = [
         '0', 'cancel', 'الغاء', 'إلغاء',
         'menu', 'القائمة',
-        '00', 'back', 'رجوع',
+        '00',
         'restart', 'اعادة', 'إعادة',
     ];
+
+    /**
+     * Step back one answer to fix a mistake. Distinct from cancel: this
+     * rewinds the current flow by a single step and re-asks that question,
+     * instead of dropping the whole conversation. Falls back to cancel when
+     * there's nothing to undo.
+     */
+    private const BACK_COMMANDS = [
+        'back', 'رجوع', 'تعديل', 'تراجع', 'عدل', 'edit',
+    ];
+
+    /** Session-data keys reserved for the step-back machinery. */
+    private const META_LAST_PROMPT = '_last_prompt';
+    private const META_RESUME       = '_resume';
 
     /** Re-run onboarding (switch role). */
     private const RESTART_ONBOARDING_COMMANDS = [
@@ -146,11 +160,30 @@ class ConversationEngine
         // to bail out and begin fresh.
         // -------------------------------------------------------------
         $isFreshStart = in_array($lower, ['start', 'menu', 'القائمة', 'hello', 'hi', 'مرحبا', 'هلو'], true);
-        $isCancel     = in_array($lower, ['0', 'cancel', 'الغاء', 'إلغاء', '00', 'back', 'رجوع'], true);
+        $isCancel     = in_array($lower, ['0', 'cancel', 'الغاء', 'إلغاء', '00'], true);
 
         if (!$session->getUser() && ($isFreshStart || $isCancel)) {
             $session->reset();
             return $this->startFlow($session->fresh(), OnboardingFlow::class);
+        }
+
+        // -------------------------------------------------------------
+        // STEP BACK ("تعديل" / "رجوع")
+        // Rewind one answer and re-ask it so the user can fix a typo,
+        // without losing the rest of the conversation. Works on every
+        // channel and even mid-onboarding. When there's nothing to undo
+        // it degrades gracefully into a normal cancel.
+        // -------------------------------------------------------------
+        if (in_array($lower, self::BACK_COMMANDS, true)) {
+            $rewound = $this->stepBack($session);
+            if ($rewound !== null) {
+                return $rewound;
+            }
+
+            $session->reset();
+            return $session->getUser()
+                ? $this->handleIdle($session->fresh(['user', 'user.roles']), 'القائمة')
+                : $this->startFlow($session->fresh(), OnboardingFlow::class);
         }
 
         // -------------------------------------------------------------
@@ -204,6 +237,10 @@ class ConversationEngine
         // -------------------------------------------------------------
         // MID-FLOW DISPATCH
         // -------------------------------------------------------------
+        $flowBefore = $session->getFlow();
+        $stepBefore = $session->getStep();
+        $dataBefore = $session->getData();
+
         $reply = match ($session->getFlow()) {
             OnboardingFlow::FLOW   => $this->onboardingFlow->handle($session, $msg),
             CarEntryFlow::FLOW     => $this->carEntryFlow->handle($session, $msg),
@@ -215,7 +252,7 @@ class ConversationEngine
         };
 
         if ($reply !== null) {
-            return $reply;
+            return $this->recordFlowTurn($session, $flowBefore, $stepBefore, $dataBefore, $reply);
         }
 
         // -------------------------------------------------------------
@@ -329,7 +366,7 @@ class ConversationEngine
 
         $fresh = $session->fresh(['user']);
 
-        return match ($flowClass) {
+        $reply = match ($flowClass) {
             OnboardingFlow::class   => $this->onboardingFlow->handle($fresh, ''),
             CarEntryFlow::class     => $this->carEntryFlow->handle($fresh, ''),
             CarExitFlow::class      => $this->carExitFlow->handle($fresh, ''),
@@ -337,6 +374,150 @@ class ConversationEngine
             PreBookingFlow::class   => $this->preBookingFlow->handle($fresh, ''),
             ParkCreationFlow::class => $this->parkFlow->handle($fresh, ''),
         };
+
+        return $this->rememberOpeningPrompt($fresh, $reply);
+    }
+
+    // =====================================================================
+    // STEP BACK / EDIT-LAST-ANSWER
+    //
+    // A flow-agnostic, single-level "undo". The engine remembers the exact
+    // prompt that asked the current step (META_LAST_PROMPT) and, whenever a
+    // flow advances, parks a resume point (META_RESUME) holding the step,
+    // the data as it was *before* that answer, and the prompt that asked it.
+    // "تعديل" restores the resume point and replays the stored prompt — so
+    // it works for typed steps and tap-to-choose steps alike, without any
+    // per-flow code.
+    // =====================================================================
+
+    /**
+     * Rewind the current flow by one answer and re-ask it. Returns null
+     * when there's nothing to undo (no active flow, or no recorded resume
+     * point yet), letting the caller fall back to a normal cancel.
+     */
+    private function stepBack(BotSession $session): ?OutboundReply
+    {
+        if ($session->getFlow() === null) {
+            return null;
+        }
+
+        $resume = $session->getData()[self::META_RESUME] ?? null;
+        if (!is_array($resume) || empty($resume['reply']) || empty($resume['step'])) {
+            return null;
+        }
+
+        $restored = is_array($resume['data'] ?? null) ? $resume['data'] : [];
+        // Re-arm: the replayed prompt becomes the current step's prompt, and
+        // the consumed resume point is dropped (single-level undo).
+        $restored[self::META_LAST_PROMPT] = $resume['reply'];
+        unset($restored[self::META_RESUME]);
+
+        $session->update([
+            'step'       => (string) $resume['step'],
+            'data'       => $restored,
+            'expires_at' => now()->addMinutes(15),
+        ]);
+
+        $reply = OutboundReply::fromArray($resume['reply']);
+
+        return $this->decorateBackHint($session, $reply, false);
+    }
+
+    /**
+     * Record a single flow turn for step-back: remember the prompt that
+     * asked the new step and, when the flow advanced, park a resume point
+     * pointing at the step the user just answered.
+     */
+    private function recordFlowTurn(
+        BotSession $session,
+        ?string $flowBefore,
+        string $stepBefore,
+        array $dataBefore,
+        OutboundReply $reply,
+    ): OutboundReply {
+        $flowAfter = $session->getFlow();
+        $stepAfter = $session->getStep();
+
+        // Flow finished (or bailed) — nothing to step back into.
+        if ($flowAfter === null || $stepAfter === 'idle') {
+            return $reply;
+        }
+
+        $advanced = $flowAfter !== $flowBefore || $stepAfter !== $stepBefore;
+        if (!$advanced) {
+            // Same step re-asked (e.g. validation error): keep the existing
+            // resume point and the original clean prompt untouched.
+            return $this->decorateBackHint($session, $reply, $this->hasResume($session));
+        }
+
+        $priorPrompt = $dataBefore[self::META_LAST_PROMPT] ?? null;
+
+        $patch = [self::META_LAST_PROMPT => $reply->toArray()];
+        $patch[self::META_RESUME] = is_array($priorPrompt)
+            ? [
+                'step'  => $stepBefore,
+                'data'  => $this->stripBackMeta($dataBefore),
+                'reply' => $priorPrompt,
+            ]
+            : null;
+
+        $session->update(['data' => array_merge($session->getData(), $patch)]);
+
+        return $this->decorateBackHint($session, $reply, $patch[self::META_RESUME] !== null);
+    }
+
+    /**
+     * Remember the opening prompt of a freshly-started flow so the user's
+     * very first answer is editable too. No resume point yet — there's no
+     * earlier answer to go back to.
+     */
+    private function rememberOpeningPrompt(BotSession $session, OutboundReply $reply): OutboundReply
+    {
+        if ($session->getFlow() === null || $session->getStep() === 'idle' || $reply->isEmpty()) {
+            return $reply;
+        }
+
+        $session->update([
+            'data' => array_merge($session->getData(), [self::META_LAST_PROMPT => $reply->toArray()]),
+        ]);
+
+        return $reply;
+    }
+
+    private function hasResume(BotSession $session): bool
+    {
+        $resume = $session->getData()[self::META_RESUME] ?? null;
+
+        return is_array($resume) && !empty($resume['reply']);
+    }
+
+    /**
+     * Strip the step-back bookkeeping keys so snapshots never nest inside
+     * one another (which would otherwise grow unbounded).
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function stripBackMeta(array $data): array
+    {
+        unset($data[self::META_LAST_PROMPT], $data[self::META_RESUME]);
+
+        return $data;
+    }
+
+    /**
+     * Append a discreet "you can edit this" hint to a typed prompt when a
+     * step-back is actually possible. Only decorates the returned copy —
+     * the raw prompt stored for replay stays hint-free, so re-showing it
+     * never stacks duplicate hints.
+     */
+    private function decorateBackHint(BotSession $session, OutboundReply $reply, bool $canGoBack): OutboundReply
+    {
+        if (!$canGoBack || $reply->type !== OutboundReply::TYPE_TEXT) {
+            return $reply;
+        }
+
+        return $reply->withAppendedBody("\n\n✏️ خطأ في إجابتك؟ أرسل *تعديل* للرجوع خطوة.");
     }
 
     // =====================================================================
@@ -367,10 +548,10 @@ class ConversationEngine
             'expires_at' => now()->addMinutes(10),
         ]);
 
-        return $this->nearbyParksFlow->handle(
-            $session->fresh(['user', 'user.roles']),
-            $latLng,
-        );
+        $fresh = $session->fresh(['user', 'user.roles']);
+        $reply = $this->nearbyParksFlow->handle($fresh, $latLng);
+
+        return $this->rememberOpeningPrompt($fresh, $reply);
     }
 
     // =====================================================================
@@ -466,8 +647,9 @@ class ConversationEngine
         $lines[] = '';
 
         $lines[] = "🆘 *في أي وقت:*";
+        $lines[] = "   *تعديل* أو *رجوع*  — تصحيح آخر إجابة (خطوة للخلف)";
         $lines[] = "   *0*  أو *الغاء*  — إلغاء العملية الحالية";
-        $lines[] = "   *00*  أو *رجوع*    — العودة للقائمة";
+        $lines[] = "   *00*  أو *القائمة*  — العودة للقائمة";
         $lines[] = "   *الحالة* أو *status*  — حسابي وحجزي الحالي";
         $lines[] = "   *مساعدة* أو *help*   — عرض هذا الدليل";
 
