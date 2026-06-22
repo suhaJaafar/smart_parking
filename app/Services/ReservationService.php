@@ -16,9 +16,12 @@ use RuntimeException;
 class ReservationService
 {
     /**
-     * How long an unclaimed reservation holds a space before it auto-expires.
+     * How long an unclaimed on-site reservation holds a space before it
+     * auto-expires. The customer must reach the park and have the owner let
+     * their car in within this window, otherwise the every-minute sweep
+     * ({@see self::expireStale()}) releases the slot.
      */
-    public const HOLD_MINUTES = 30;
+    public const HOLD_MINUTES = 10;
 
     /**
      * Pre-bookings are made remotely (e.g. from home for a later arrival),
