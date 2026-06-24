@@ -37,6 +37,7 @@ class TelegramTransport implements BotTransport
             OutboundReply::TYPE_TEXT    => $this->sendText($recipient, $reply->body),
             OutboundReply::TYPE_CTA_URL => $this->sendCtaUrl($recipient, $reply->body, $reply->ctaText ?? '', $reply->url ?? ''),
             OutboundReply::TYPE_BUTTONS => $this->sendButtons($recipient, $reply->body, $reply->options, $reply->linkButton),
+            OutboundReply::TYPE_REQUEST_CONTACT => $this->sendRequestContact($recipient, $reply->body, $reply->ctaText ?? ''),
             default                     => null,
         };
     }
@@ -112,6 +113,35 @@ class TelegramTransport implements BotTransport
                 $fallback .= "\n\n" . $linkButton['title'] . ": " . $linkButton['url'];
             }
             $this->sendText($chatId, $fallback);
+        }
+    }
+
+    /**
+     * Ask the user to share their phone number via Telegram's native
+     * `request_contact` reply keyboard. When tapped, Telegram delivers a
+     * `contact` message that {@see TelegramInboundParser} normalises into
+     * digits-only inbound text. The keyboard is one-shot — it hides itself
+     * after the user taps it.
+     */
+    private function sendRequestContact(string $chatId, string $body, string $buttonLabel): void
+    {
+        $label = $buttonLabel !== '' ? $buttonLabel : 'مشاركة رقمي';
+
+        $ok = $this->dispatch('sendMessage', [
+            'chat_id'      => $chatId,
+            'text'         => $body,
+            'parse_mode'   => 'Markdown',
+            'reply_markup' => [
+                'keyboard' => [[
+                    ['text' => mb_substr($label, 0, 64), 'request_contact' => true],
+                ]],
+                'resize_keyboard'   => true,
+                'one_time_keyboard' => true,
+            ],
+        ]);
+
+        if (!$ok) {
+            $this->sendText($chatId, $body);
         }
     }
 

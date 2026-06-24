@@ -35,11 +35,13 @@ final class CarPlate
      */
     public static function fromString(string $input): ?self
     {
-        // Translate Arabic-Indic / Persian digits → ASCII before the regex
-        // so plates typed on Arabic keyboards ("BG-١٢٣٤٥") match too.
         $normalized = mb_strtoupper(trim(DigitNormalizer::toAscii($input)));
 
-        if (!preg_match('/^([A-Z]{1,8})[\s\-]?([0-9]{1,20})$/u', $normalized, $m)) {
+        // Prefix: 1–8 English/Arabic letters or digits (lazy, so it never
+        //         swallows the separator or the trailing number).
+        // Separator: an optional single dash or space.
+        // Number: the trailing run of 1–20 ASCII digits.
+        if (!preg_match('/^([A-Z0-9\x{0621}-\x{064A}]{1,8}?)[\s\-]?([0-9]{1,20})$/u', $normalized, $m)) {
             return null;
         }
 

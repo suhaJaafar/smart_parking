@@ -5,7 +5,6 @@ namespace App\Bots\Flows;
 use App\Bots\Contracts\BotNotifier;
 use App\Bots\Contracts\BotSession;
 use App\Bots\Dto\OutboundReply;
-use App\Bots\Support\DigitNormalizer;
 use App\Bots\Support\Prompt;
 use App\Data\CarPlate;
 use App\Enums\PaymentStatusTypes;
@@ -156,10 +155,12 @@ class CarEntryFlow
             ? "🚗 {$car->plate_prefix}-{$car->car_number} — {$name}"
             : "👤 {$name} — بدون سيارة مسجّلة";
 
-        $badge       = $reserve->is_pre_booking ? '💳 حجز مسبق • ' : '';
-        $description = $car
-            ? $badge . "رمز: {$reserve->booking_code}"
-            : $badge . "أدخل اللوحة بعد الاختيار";
+        if ($car) {
+            $description = $reserve->is_pre_booking ? '💳 حجز مسبق' : 'جاهزة للإدخال';
+        } else {
+            $badge       = $reserve->is_pre_booking ? '💳 حجز مسبق • ' : '';
+            $description = $badge . 'أدخل اللوحة بعد الاختيار';
+        }
 
         return [
             'id'          => self::ENTRY_OPTION_PREFIX . $reserve->id,
@@ -169,8 +170,8 @@ class CarEntryFlow
     }
 
     /**
-     * Owner tapped an arriving car (or typed a booking code as a fallback).
-     * Resolve the reservation/customer in the backend and enter the car.
+     * Owner tapped an arriving car. Resolve the reservation/customer in the
+     * backend and enter the car.
      */
     private function afterCarChoice(BotSession $session, string $message): OutboundReply
     {
@@ -183,7 +184,7 @@ class CarEntryFlow
         $raw   = trim($message);
         $lower = mb_strtolower($raw);
 
-        // A tapped arriving-car choice — the happy path.
+        // A tapped arriving-car choice — the only path.
         if (str_starts_with($lower, self::ENTRY_OPTION_PREFIX)) {
             return $this->enterFromChoice(
                 $session,
@@ -192,21 +193,8 @@ class CarEntryFlow
             );
         }
 
-        // Fallback: owner typed the booking code by hand. We can't know which
-        // car is arriving from a code alone, so we ask for the plate.
-        $code = DigitNormalizer::toAscii($raw);
-        if (preg_match('/^\d{3,4}$/', $code)) {
-            $reserve = $this->reservations->findPendingByBookingCode($park, $code);
-            if ($reserve && $reserve->user) {
-                $this->merge($session, ['booking_code' => $reserve->booking_code], 'plate');
-                return OutboundReply::text(
-                    Prompt::ask("🚗 أرسل لوحة السيارة \nمثال: BG-12345")
-                );
-            }
-        }
-
         return OutboundReply::text(
-            Prompt::ask("⚠️ اختر سيارة من القائمة، أو أرسل *booking code* الصحيح (3 أو 4 أرقام).")
+            Prompt::ask("⚠️ اختر السيارة الواصلة من القائمة أعلاه.")
         );
     }
 
@@ -242,9 +230,9 @@ class CarEntryFlow
         // No car on file → ask for the plate, remembering which reservation
         // we're fulfilling so the follow-up plate step re-resolves it.
         if (!$car) {
-            $this->merge($session, ['booking_code' => $reserve->booking_code], 'plate');
+            $this->merge($session, ['reserve_id' => $reserve->id], 'plate');
             return OutboundReply::text(
-                Prompt::ask("🚗 أرسل لوحة السيارة \nمثال: BG-12345")
+                Prompt::ask("🚗 أرسل لوحة السيارة \nمثال: 11G-12345")
             );
         }
 
@@ -259,7 +247,7 @@ class CarEntryFlow
         $plate = CarPlate::fromString($message);
         if ($plate === null) {
             return OutboundReply::text(
-                Prompt::ask("⚠️ صيغة اللوحة غير صحيحة. (مثال: BG-12345)")
+                Prompt::ask("⚠️ صيغة اللوحة غير صحيحة. (مثال: 11G-12345)")
             );
         }
 
@@ -325,7 +313,7 @@ class CarEntryFlow
 
     /**
      * Re-resolve the (park, customer) pair from the session's stored
-     * booking code. Returns null when the park is gone or the pending
+     * reservation id. Returns null when the park is gone or the pending
      * reservation no longer exists (e.g. it expired between steps).
      *
      * @return array{0: Park, 1: User}|null
@@ -339,12 +327,17 @@ class CarEntryFlow
             return null;
         }
 
-        $bookingCode = $data['booking_code'] ?? null;
-        if (!$bookingCode) {
+        $reserveId = $data['reserve_id'] ?? null;
+        if (!$reserveId) {
             return null;
         }
 
-        $reserve = $this->reservations->findPendingByBookingCode($park, $bookingCode);
+        $reserve = Reserve::where('park_id', $park->id)
+            ->whereKey($reserveId)
+            ->where('status', Reserve::STATUS_START)
+            ->with('user')
+            ->first();
+
         if (!$reserve || !$reserve->user) {
             return null;
         }

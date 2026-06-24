@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\PaymentStatusTypes;
+use App\Models\Car;
 use App\Models\Park;
 use App\Models\Reserve;
 use App\Models\User;
@@ -40,8 +41,22 @@ class ReservationService
      */
     public const PRE_BOOKING_GRACE_MINUTES = 10;
 
+    /**
+     * How long an *entered* (ACTIVE) reservation may sit unpaid before the
+     * sweep ({@see self::expireStaleActive()}) force-closes it: the car is
+     * auto-exited (releasing the slot) and the reservation is cancelled.
+     *
+     * Measured from the reservation's `created_at`. On-site holds are entered
+     * within {@see self::HOLD_MINUTES} of creation, so created_at is a close
+     * proxy for the entry time. This only ever touches unpaid stays — once the
+     * customer pays, the slot is theirs and the reservation is never
+     * auto-closed.
+     */
+    public const ACTIVE_UNPAID_TIMEOUT_HOURS = 24;
+
     public function __construct(
         private readonly PaymentService $payments,
+        private readonly CarService $cars,
     ) {}
 
     /**
@@ -290,19 +305,70 @@ class ReservationService
     }
 
     /**
-     * Find the pending reservation by booking code within a specific park.
+     * Sweep entered-but-unpaid stays: any ACTIVE reservation created more
+     * than {@see self::ACTIVE_UNPAID_TIMEOUT_HOURS} hours ago which the
+     * customer never paid for is force-closed — the car is auto-exited
+     * (releasing the slot) and the reservation is CANCELLED.
      *
-     * Scope to START only so the same code cannot be reused to re-enter
-     * an already-activated reservation.
+     * A paid stay is always honoured and never touched here. Designed to run
+     * on the same frequent schedule as {@see self::expireStale()}.
+     *
+     * Returns the number of reservations closed this run.
      */
-    public function findPendingByBookingCode(Park $park, string $bookingCode): ?Reserve
+    public function expireStaleActive(): int
     {
-        return Reserve::where('park_id', $park->id)
-            ->where('booking_code', $bookingCode)
-            ->where('status', Reserve::STATUS_START)
-            ->with('user')
-            ->latest('created_at')
-            ->first();
+        $count  = 0;
+        $cutoff = now()->subHours(self::ACTIVE_UNPAID_TIMEOUT_HOURS);
+
+        // Snapshot the candidate ids, then process each in its own
+        // transaction so one bad row can't poison the whole sweep.
+        $staleIds = Reserve::where('status', Reserve::STATUS_ACTIVE)
+            ->where('created_at', '<', $cutoff)
+            ->pluck('id');
+
+        foreach ($staleIds as $id) {
+            DB::transaction(function () use ($id, $cutoff, &$count) {
+                $reserve = Reserve::whereKey($id)->lockForUpdate()->first();
+
+                if (!$reserve || $reserve->status !== Reserve::STATUS_ACTIVE) {
+                    return;
+                }
+
+                if ($reserve->created_at === null || $reserve->created_at->gt($cutoff)) {
+                    return;
+                }
+
+                // A paid stay is the customer's — never auto-close it.
+                $paid = $reserve->payments()
+                    ->where('status', PaymentStatusTypes::SUCCESS->value)
+                    ->exists();
+
+                if ($paid) {
+                    return;
+                }
+
+                // Physically release the car if it's still parked here;
+                // CarService::exitPark also refunds the slot. If the car is
+                // already gone, refund the slot defensively so it isn't lost.
+                $car = Car::where('user_id', $reserve->user_id)
+                    ->where('park_id', $reserve->park_id)
+                    ->first();
+
+                if ($car) {
+                    $this->cars->exitPark($car);
+                } else {
+                    $park = Park::whereKey($reserve->park_id)->lockForUpdate()->first();
+                    if ($park && $park->free_spaces < $park->capacity) {
+                        $park->increment('free_spaces');
+                    }
+                }
+
+                $reserve->update(['status' => Reserve::STATUS_CANCELLED]);
+                $count++;
+            });
+        }
+
+        return $count;
     }
 
     /**
