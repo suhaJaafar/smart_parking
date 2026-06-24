@@ -7,6 +7,7 @@ use App\Bots\Channels\Telegram\TelegramTransport;
 use App\Bots\Engine\ConversationEngine;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -39,7 +40,20 @@ class TelegramController
         Log::info('Telegram webhook received', ['raw' => $request->getContent()]);
 
         $update = $request->json()->all();
-        $msg    = $this->parser->fromUpdate($update);
+
+        // Telegram re-delivers the SAME update (identical update_id) whenever
+        // our webhook is slow to ACK with 200. Re-running the flow on a
+        // redelivery advances the step and then treats the duplicate as the
+        // next answer — surfacing spurious "invalid plate" / "didn't
+        // understand" replies. Dedupe: handle each update_id at most once.
+        $updateId = $update['update_id'] ?? null;
+        if ($updateId !== null
+            && !Cache::add('tg:update:' . $updateId, true, now()->addMinutes(10))
+        ) {
+            return response('OK', 200);
+        }
+
+        $msg = $this->parser->fromUpdate($update);
 
         if ($msg === null) {
             // Unhandled update type — ACK so Telegram doesn't retry.
