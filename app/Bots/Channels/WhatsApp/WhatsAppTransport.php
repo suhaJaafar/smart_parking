@@ -36,6 +36,7 @@ class WhatsAppTransport implements BotTransport
             OutboundReply::TYPE_TEXT    => $this->sendText($recipient, $reply->body),
             OutboundReply::TYPE_CTA_URL => $this->sendCtaUrl($recipient, $reply->body, $reply->ctaText ?? '', $reply->url ?? ''),
             OutboundReply::TYPE_BUTTONS => $this->sendButtons($recipient, $reply->body, $reply->options, $reply->listButton, $reply->linkButton),
+            OutboundReply::TYPE_REQUEST_CONTACT => $this->sendText($recipient, $reply->body),
             default                     => null,
         };
     }

@@ -5,6 +5,7 @@ namespace App\Bots\Flows;
 use App\Bots\Contracts\BotNotifier;
 use App\Bots\Contracts\BotSession;
 use App\Bots\Dto\OutboundReply;
+use App\Bots\Flows\Concerns\CollectsPhoneNumber;
 use App\Bots\Support\DigitNormalizer;
 use App\Bots\Support\Prompt;
 use App\Models\Park;
@@ -36,6 +37,8 @@ use Throwable;
  */
 class PreBookingFlow
 {
+    use CollectsPhoneNumber;
+
     public const FLOW = 'pre_booking';
     private const TTL_MINUTES = 15;
     private const RADIUS_METERS = 5000;
@@ -74,6 +77,7 @@ class PreBookingFlow
 
         return match ($session->getStep()) {
             'ask_location' => $this->showResults($session, $message),
+            'ask_phone'    => $this->onPhoneStep($session, $message),
             'choose_park'  => $this->onParkChosen($session, $message),
             'ask_time'     => $this->onTimeChosen($session, $message),
             'confirm'      => $this->confirmAndPay($session, $message),
@@ -108,6 +112,31 @@ class PreBookingFlow
             );
         }
 
+        // Collect the customer's phone once before showing parks so the
+        // owner can reach them (skipped if already known).
+        if ($this->needsPhone($session->getUser())) {
+            return $this->startPhoneGate($session, $lat, $lng, self::TTL_MINUTES);
+        }
+
+        return $this->showParks($session, $lat, $lng);
+    }
+
+    /**
+     * Resume after the phone step: still collecting → return its reply;
+     * captured → continue the park search with the stashed coordinates.
+     */
+    private function onPhoneStep(BotSession $session, string $message): OutboundReply
+    {
+        $result = $this->handlePhoneStep($session, $message);
+        if ($result instanceof OutboundReply) {
+            return $result;
+        }
+
+        return $this->showParks($session, $result['lat'], $result['lng']);
+    }
+
+    private function showParks(BotSession $session, float $lat, float $lng): OutboundReply
+    {
         $parks = $this->parks->nearby(
             latitude:     $lat,
             longitude:    $lng,
@@ -279,8 +308,7 @@ class PreBookingFlow
         return OutboundReply::text(
             "✅ تم حجز مكان لك مسبقاً في *{$choice['name']}*\n\n"
             . "🕒 موعد وصولك: *{$schedule}*\n"
-            . "🗺️ للاتجاهات: [اضغط هنا]({$mapsUrl})\n"
-            . "🔑 *رمز الحجز:* `{$reserve->booking_code}`\n\n"
+            . "🗺️ للاتجاهات: [اضغط هنا]({$mapsUrl})\n\n"
             . "💳 لإتمام الحجز، ادفع الآن بإرسال *تم الحجز*\n"
             . "_أو أرسل *0* للإلغاء._"
         );
@@ -325,10 +353,9 @@ class PreBookingFlow
             "💳 *الدفع المسبق لحجزك*\n\n"
             . "📍 الموقف: *{$reserve->park->name}*\n"
             . ($schedule ? "🕒 موعد الوصول: *{$schedule}*\n" : '')
-            . "💰 المبلغ: *{$amount}*\n"
-            . "🔑 رمز الحجز: `{$reserve->booking_code}`\n\n"
+            . "💰 المبلغ: *{$amount}*\n\n"
             . "💳 لإتمام عملية الدفع: [اضغط هنا]({$url})\n\n"
-            . "_بعد الدفع، أعطِ رمز الحجز لصاحب الموقف عند وصولك._"
+            . "_بعد الدفع، سيؤكّد صاحب الموقف دخول سيارتك عند وصولك._"
         );
     }
 
@@ -346,6 +373,8 @@ class PreBookingFlow
 
             $customer     = $reserve->user;
             $customerName = $customer?->name ?: 'سائق';
+            $customerPhone = $customer?->phone_number;
+            $contactLine  = $customerPhone ? "📱 هاتف الزبون: *+{$customerPhone}*\n" : '';
 
             $schedule = $reserve->scheduled_at
                 ? $this->formatSchedule($reserve->scheduled_at)
@@ -356,8 +385,8 @@ class PreBookingFlow
             $message = "🔔 *حجز مسبق جديد في موقفك*\n\n"
                      . "الموقف: *{$park->name}*\n"
                      . "الزبون: *{$customerName}*\n"
+                     . $contactLine
                      . "🕒 موعد الوصول: *{$schedule}*\n"
-                     . "booking code: *`{$reserve->booking_code}`*\n"
                      . "الأماكن المتبقية: *{$park->free_spaces}*\n\n"
                      . "_حجز مسبق مدفوع — لا حاجة لإدخال السيارة لتفعيل الدفع._";
 

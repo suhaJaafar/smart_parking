@@ -75,7 +75,7 @@ class CarExitFlow
         ]);
 
         return OutboundReply::text(
-            Prompt::ask("🚙 أرسل لوحة السيارة الخارجة (مثال: BG-12345)")
+            Prompt::ask("🚙 أرسل لوحة السيارة الخارجة (مثال: 11G-12345)")
         );
     }
 
@@ -86,7 +86,7 @@ class CarExitFlow
         $plate = CarPlate::fromString($message);
         if ($plate === null) {
             return OutboundReply::text(
-                Prompt::ask("⚠️ صيغة اللوحة غير صحيحة. مثال: BG-12345")
+                Prompt::ask("⚠️ صيغة اللوحة غير صحيحة. مثال: 11G-12345")
             );
         }
 

@@ -24,6 +24,7 @@ final class OutboundReply
     public const TYPE_TEXT    = 'text';
     public const TYPE_CTA_URL = 'cta_url';
     public const TYPE_BUTTONS = 'buttons';
+    public const TYPE_REQUEST_CONTACT = 'request_contact';
     public const TYPE_EMPTY   = 'empty';
 
     /**
@@ -114,6 +115,22 @@ final class OutboundReply
             listButton: $listButton,
             linkButton: $link,
         );
+    }
+
+    /**
+     * A prompt asking the user to share their phone number via the channel's
+     * native "share contact" affordance (Telegram's `request_contact` reply
+     * keyboard). $buttonLabel is the tappable button's caption; it is carried
+     * in {@see self::$ctaText}. Channels without a native contact request
+     * (e.g. WhatsApp) fall back to sending the body as plain text.
+     */
+    public static function requestContact(string $body, string $buttonLabel): self
+    {
+        if ($body === '' || $buttonLabel === '') {
+            throw new InvalidArgumentException('request_contact reply requires body and buttonLabel.');
+        }
+
+        return new self(self::TYPE_REQUEST_CONTACT, $body, $buttonLabel);
     }
 
     public static function empty(): self

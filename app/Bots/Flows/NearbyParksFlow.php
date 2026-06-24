@@ -5,6 +5,7 @@ namespace App\Bots\Flows;
 use App\Bots\Contracts\BotNotifier;
 use App\Bots\Contracts\BotSession;
 use App\Bots\Dto\OutboundReply;
+use App\Bots\Flows\Concerns\CollectsPhoneNumber;
 use App\Bots\Support\DigitNormalizer;
 use App\Bots\Support\Prompt;
 use App\Models\Park;
@@ -28,6 +29,8 @@ use Throwable;
  */
 class NearbyParksFlow
 {
+    use CollectsPhoneNumber;
+
     public const FLOW = 'nearby_parks';
     private const TTL_MINUTES = 10;
     private const RADIUS_METERS = 5000;
@@ -59,6 +62,7 @@ class NearbyParksFlow
 
         return match ($session->getStep()) {
             'ask_location' => $this->showResults($session, $message),
+            'ask_phone'    => $this->onPhoneStep($session, $message),
             'choose_park'  => $this->reserve($session, $message),
             default        => OutboundReply::empty(),
         };
@@ -91,6 +95,32 @@ class NearbyParksFlow
             );
         }
 
+        // The space owner needs a way to reach the customer — collect the
+        // phone number once before showing parks (skipped if already known,
+        // e.g. WhatsApp users whose number is their wa_id).
+        if ($this->needsPhone($session->getUser())) {
+            return $this->startPhoneGate($session, $lat, $lng, self::TTL_MINUTES);
+        }
+
+        return $this->showParks($session, $lat, $lng);
+    }
+
+    /**
+     * Resume after the phone step: still collecting → return its reply;
+     * captured → continue the park search with the stashed coordinates.
+     */
+    private function onPhoneStep(BotSession $session, string $message): OutboundReply
+    {
+        $result = $this->handlePhoneStep($session, $message);
+        if ($result instanceof OutboundReply) {
+            return $result;
+        }
+
+        return $this->showParks($session, $result['lat'], $result['lng']);
+    }
+
+    private function showParks(BotSession $session, float $lat, float $lng): OutboundReply
+    {
         $parks = $this->parks->nearby(
             latitude:     $lat,
             longitude:    $lng,
@@ -184,16 +214,12 @@ class NearbyParksFlow
         $expires = $reserve->expires_at->setTimezone(config('app.timezone'))->format('H:i');
         $mapsUrl = sprintf('https://www.google.com/maps?q=%F,%F', $choice['lat'], $choice['lng']);
 
-        // Show the customer the booking code they need to give the owner.
-        $keyLine = "🔑 *رمز الحجز:* `{$reserve->booking_code}`\n"
-                 . "_اعطِ هذا الرمز لصاحب الموقف عند وصولك._\n\n";
-
         return OutboundReply::text(
             "✅ تم حجز مكان لك في *{$choice['name']}*\n\n"
             . "🗺️ للاتجاهات: [اضغط هنا]({$mapsUrl})\n"
             . "⏰ صالح حتّى الساعة {$expires}\n\n"
-            . $keyLine
-            . "إذا لم تصل قبل ذلك سيتم إلغاء الحجز تلقائياً."
+            . "🚗 عند وصولك سيؤكّد صاحب الموقف دخول سيارتك مباشرةً.\n"
+            . "إذا لم تصل قبل الوقت المحدد سيتم إلغاء الحجز تلقائياً."
         );
     }
 
@@ -212,18 +238,21 @@ class NearbyParksFlow
 
             $customer      = $reserve->user ?? $reserve->user;
             $customerName  = $customer?->name ?: 'سائق';
+            $customerPhone = $customer?->phone_number;
 
             $expires = $reserve->expires_at
                 ? $reserve->expires_at->setTimezone(config('app.timezone'))->format('H:i')
                 : '—';
 
+            $contactLine = $customerPhone ? "📱 هاتف الزبون: *+{$customerPhone}*\n" : '';
+
             $message = "🔔 *حجز جديد في موقفك*\n\n"
                      . "الموقف: *{$park->name}*\n"
                      . "الزبون: *{$customerName}*\n"
-                     . "رمز الحجز: *`{$reserve->booking_code}`*\n"
+                     . $contactLine
                      . "صالح حتّى الساعة: {$expires}\n"
                      . "الأماكن المتبقية: *{$park->free_spaces}*\n\n"
-                     . "_سيتم إلغاء الحجز تلقائياً إذا لم يصل الزبون في الوقت المحدد._";
+                     . "_سيظهر الزبون في قائمة السيارات الواصلة عند وصوله. سيتم الإلغاء تلقائياً إذا لم يصل في الوقت المحدد._";
 
             $this->notifier->notify($owner, OutboundReply::text($message));
         } catch (Throwable $e) {

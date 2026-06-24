@@ -42,7 +42,7 @@ class ConversationEngine
     private const ESCAPE_COMMANDS = [
         '0', 'cancel', 'الغاء', 'إلغاء',
         'menu', 'القائمة',
-        '00',
+        '9',
         'restart', 'اعادة', 'إعادة',
     ];
 
@@ -160,7 +160,7 @@ class ConversationEngine
         // to bail out and begin fresh.
         // -------------------------------------------------------------
         $isFreshStart = in_array($lower, ['start', 'menu', 'القائمة', 'hello', 'hi', 'مرحبا', 'هلو'], true);
-        $isCancel     = in_array($lower, ['0', 'cancel', 'الغاء', 'إلغاء', '00'], true);
+        $isCancel     = in_array($lower, ['0', 'cancel', 'الغاء', 'إلغاء', '9'], true);
 
         if (!$session->getUser() && ($isFreshStart || $isCancel)) {
             $session->reset();
@@ -517,7 +517,7 @@ class ConversationEngine
             return $reply;
         }
 
-        return $reply->withAppendedBody("\n\n✏️ خطأ في إجابتك؟ أرسل *تعديل* للرجوع خطوة.");
+        return $reply->withAppendedBody("\n\n✏️ خطأ في إجابتك؟ أرسل *تعديل* للرجوع.");
     }
 
     // =====================================================================
@@ -649,7 +649,7 @@ class ConversationEngine
         $lines[] = "🆘 *في أي وقت:*";
         $lines[] = "   *تعديل* أو *رجوع*  — تصحيح آخر إجابة (خطوة للخلف)";
         $lines[] = "   *0*  أو *الغاء*  — إلغاء العملية الحالية";
-        $lines[] = "   *00*  أو *القائمة*  — العودة للقائمة";
+        $lines[] = "   *9*  أو *القائمة*  — العودة للقائمة";
         $lines[] = "   *الحالة* أو *status*  — حسابي وحجزي الحالي";
         $lines[] = "   *مساعدة* أو *help*   — عرض هذا الدليل";
 
@@ -676,9 +676,8 @@ class ConversationEngine
         ];
 
         if ($user->phone_number) {
-            $lines[] = "رقم الواتساب: *+{$user->phone_number}*";
-        }
-        if ($user->telegram_chat_id) {
+            $lines[] = "📱 رقم الهاتف: *+{$user->phone_number}*";
+        } elseif ($user->telegram_chat_id) {
             $lines[] = "تيليجرام: *{$user->telegram_chat_id}*";
         }
         $lines[] = "الأدوار: " . ($roles ?: '—');
