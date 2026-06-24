@@ -372,6 +372,79 @@ class ReservationService
     }
 
     /**
+     * Sweep paid stays the owner forgot to close: any ACTIVE reservation the
+     * customer already paid for, whose payment settled more than
+     * {@see self::PAID_STAY_EXIT_GRACE_MINUTES} ago, is auto-completed — the
+     * car is exited (releasing the slot) and the reservation → COMPLETED.
+     *
+     * This is the counterpart to {@see self::expireStaleActive()} (which only
+     * touches *unpaid* stays). Together they guarantee an ACTIVE row can never
+     * hold a slot indefinitely: unpaid stays are cancelled after the long
+     * timeout, paid stays are completed shortly after settlement. Designed to
+     * run on the same every-minute schedule.
+     *
+     * Returns the number of stays closed this run.
+     */
+    public function closePaidStaleActive(): int
+    {
+        $count  = 0;
+        $cutoff = now()->subMinutes(self::PAID_STAY_EXIT_GRACE_MINUTES);
+
+        // Snapshot the candidate ids, then process each in its own
+        // transaction so one bad row can't poison the whole sweep.
+        $staleIds = Reserve::where('status', Reserve::STATUS_ACTIVE)
+            ->whereHas('payments', function ($query) use ($cutoff) {
+                $query->where('status', PaymentStatusTypes::SUCCESS->value)
+                    ->whereNotNull('paid_at')
+                    ->where('paid_at', '<', $cutoff);
+            })
+            ->pluck('id');
+
+        foreach ($staleIds as $id) {
+            DB::transaction(function () use ($id, $cutoff, &$count) {
+                $reserve = Reserve::whereKey($id)->lockForUpdate()->first();
+
+                if (!$reserve || $reserve->status !== Reserve::STATUS_ACTIVE) {
+                    return;
+                }
+
+                // Re-confirm a settled payment older than the grace window
+                // (use the earliest success so an early payer isn't penalised).
+                $paidAt = $reserve->payments()
+                    ->where('status', PaymentStatusTypes::SUCCESS->value)
+                    ->whereNotNull('paid_at')
+                    ->min('paid_at');
+
+                if ($paidAt === null || Carbon::parse($paidAt)->gt($cutoff)) {
+                    return;
+                }
+
+                // Release the car if it's still parked here; exitPark also
+                // refunds the slot. If the car already left, refund defensively
+                // so the slot isn't lost.
+                $car = Car::where('user_id', $reserve->user_id)
+                    ->where('park_id', $reserve->park_id)
+                    ->first();
+
+                if ($car) {
+                    $this->cars->exitPark($car);
+                } else {
+                    $park = Park::whereKey($reserve->park_id)->lockForUpdate()->first();
+                    if ($park && $park->free_spaces < $park->capacity) {
+                        $park->increment('free_spaces');
+                    }
+                }
+
+                // Paid + fulfilled stay → COMPLETED (not CANCELLED).
+                $reserve->update(['status' => Reserve::STATUS_COMPLETED]);
+                $count++;
+            });
+        }
+
+        return $count;
+    }
+
+    /**
      * All still-pending holds (START) for a park, newest first, with each
      * reservation's customer and that customer's cars (newest first)
      * eager-loaded — a single query, no per-row lookups.
