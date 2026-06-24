@@ -19,7 +19,8 @@ use Throwable;
 /**
  * State-machine for creating a Park.
  *
- * Steps: name → capacity → location → done. The city is reverse-geocoded
+ * Steps: name → capacity → price → location → done. The owner sets a flat
+ * price that is charged once per reservation. The city is reverse-geocoded
  * from the shared location, not asked from the user.
  *
  * State persists in whichever channel session table (whatsapp_sessions /
@@ -51,7 +52,8 @@ class ParkCreationFlow
 
         return match ($session->getStep()) {
             'name'     => $this->askCapacity($session, $message),
-            'capacity' => $this->askLocation($session, $message),
+            'capacity' => $this->askPrice($session, $message),
+            'price'    => $this->askLocation($session, $message),
             'location' => $this->finish($session, $message),
             default    => OutboundReply::empty(),
         };
@@ -96,7 +98,7 @@ class ParkCreationFlow
         return OutboundReply::text(Prompt::ask("🔢 ما السعة الكلية؟ (رقم صحيح موجب)"));
     }
 
-    private function askLocation(BotSession $session, string $message): OutboundReply
+    private function askPrice(BotSession $session, string $message): OutboundReply
     {
         $msg = trim(DigitNormalizer::toAscii($message));
         if (!ctype_digit($msg) || (int) $msg < 1) {
@@ -104,7 +106,24 @@ class ParkCreationFlow
         }
 
         $cap = (int) $msg;
-        $this->merge($session, ['capacity' => $cap, 'free_spaces' => $cap], 'location');
+        $this->merge($session, ['capacity' => $cap, 'free_spaces' => $cap], 'price');
+
+        return OutboundReply::text(
+            Prompt::ask("💰 ما سعر الحجز الواحد؟ (بالدينار العراقي — يُخصم مرة واحدة عند دخول السيارة)")
+        );
+    }
+
+    private function askLocation(BotSession $session, string $message): OutboundReply
+    {
+        $msg = trim(DigitNormalizer::toAscii($message));
+        if (!ctype_digit($msg) || (int) $msg < 1) {
+            return OutboundReply::text(
+                Prompt::ask("⚠️ أرسل سعراً صحيحاً موجباً بالدينار (مثال: 2000).")
+            );
+        }
+
+        $price = (int) $msg;
+        $this->merge($session, ['price' => $price], 'location');
 
         return OutboundReply::text(
             Prompt::ask("📍 شارك موقعك عبر زر الموقع في تطبيقك\n_سيتم تحديد المدينة تلقائياً._")
@@ -137,6 +156,7 @@ class ParkCreationFlow
                 park: new ParkData(
                     name:     $data['name'],
                     capacity: $data['capacity'],
+                    price:    isset($data['price']) ? (float) $data['price'] : null,
                 ),
                 owner: $session->getUser(),
             );
@@ -149,9 +169,12 @@ class ParkCreationFlow
         $session->reset();
 
         $cityLine = $city ? "المدينة: {$city}\n" : '';
+        $priceLine = 'السعر: ' . number_format((float) $park->price, 0)
+                   . ' ' . config('services.qicard.currency') . " (يُخصم مرة واحدة)\n";
         $body = "✅ تم إنشاء الموقف!\n"
               . "الاسم: {$park->name}\n"
               . "السعة: {$park->capacity}\n"
+              . $priceLine
               . $cityLine
               . "\n"
               . "أرسل *موقفي* لعرض جميع مواقفك، أو *القائمة* للقائمة الرئيسية.";

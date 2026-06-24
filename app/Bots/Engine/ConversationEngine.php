@@ -10,6 +10,7 @@ use App\Bots\Flows\CarExitFlow;
 use App\Bots\Flows\NearbyParksFlow;
 use App\Bots\Flows\OnboardingFlow;
 use App\Bots\Flows\ParkCreationFlow;
+use App\Bots\Flows\ParkPriceFlow;
 use App\Bots\Flows\PreBookingFlow;
 use App\Bots\Support\DigitNormalizer;
 use App\Bots\Support\MenuRenderer;
@@ -99,6 +100,7 @@ class ConversationEngine
         private readonly CarExitFlow $carExitFlow,
         private readonly NearbyParksFlow $nearbyParksFlow,
         private readonly ParkCreationFlow $parkFlow,
+        private readonly ParkPriceFlow $parkPriceFlow,
         private readonly PreBookingFlow $preBookingFlow,
         private readonly MenuRenderer $menu,
         private readonly ReservationService $reservations,
@@ -248,6 +250,7 @@ class ConversationEngine
             NearbyParksFlow::FLOW  => $this->nearbyParksFlow->handle($session, $msg),
             PreBookingFlow::FLOW   => $this->preBookingFlow->handle($session, $msg),
             ParkCreationFlow::FLOW => $this->parkFlow->handle($session, $msg),
+            ParkPriceFlow::FLOW    => $this->parkPriceFlow->handle($session, $msg),
             default                => null,
         };
 
@@ -306,6 +309,17 @@ class ConversationEngine
             ];
             if (isset($createParkMap[$lower])) {
                 return $this->startFlow($session, $createParkMap[$lower]);
+            }
+
+            $priceMap = [
+                'السعر'        => ParkPriceFlow::class,
+                'تسعير'        => ParkPriceFlow::class,
+                'تحديد السعر'  => ParkPriceFlow::class,
+                'price'        => ParkPriceFlow::class,
+                'set price'    => ParkPriceFlow::class,
+            ];
+            if (isset($priceMap[$lower])) {
+                return $this->startFlow($session, $priceMap[$lower]);
             }
         }
 
@@ -373,6 +387,7 @@ class ConversationEngine
             NearbyParksFlow::class  => $this->nearbyParksFlow->handle($fresh, ''),
             PreBookingFlow::class   => $this->preBookingFlow->handle($fresh, ''),
             ParkCreationFlow::class => $this->parkFlow->handle($fresh, ''),
+            ParkPriceFlow::class    => $this->parkPriceFlow->handle($fresh, ''),
         };
 
         return $this->rememberOpeningPrompt($fresh, $reply);
@@ -626,6 +641,7 @@ class ConversationEngine
             $lines[] = "   *2*  خروج سيارة من الكراج";
             $lines[] = "   *3*  إنشاء موقف جديد";
             $lines[] = "   *موقفي*  عرض مواقفي المسجلة";
+            $lines[] = "   *السعر*  تحديد سعر الحجز في موقفك";
             $lines[] = "   *تسجيل الدخول*  رمز الدخول إلى لوحة التحكم على الويب";
             $lines[] = '';
         }
@@ -787,6 +803,8 @@ class ConversationEngine
 
         $line  = "{$prefix}*{$park->name}*\n";
         $line .= "   السعة: {$park->capacity} • المتاح: {$park->free_spaces}\n";
+        $line .= "   💰 السعر: " . number_format((float) $park->price, 0)
+               . ' ' . config('services.qicard.currency') . "\n";
         if ($city) {
             $line .= "   المدينة: {$city}\n";
         }
