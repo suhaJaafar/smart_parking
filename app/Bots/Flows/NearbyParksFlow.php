@@ -213,11 +213,13 @@ class NearbyParksFlow
 
         $expires = $reserve->expires_at->setTimezone(config('app.timezone'))->format('H:i');
         $mapsUrl = sprintf('https://www.google.com/maps?q=%F,%F', $choice['lat'], $choice['lng']);
+        $priceText = number_format((float) $park->price, 0) . ' ' . config('services.qicard.currency');
 
         return OutboundReply::text(
             "✅ تم حجز مكان لك في *{$choice['name']}*\n\n"
             . "🗺️ للاتجاهات: [اضغط هنا]({$mapsUrl})\n"
-            . "⏰ صالح حتّى الساعة {$expires}\n\n"
+            . "⏰ صالح حتّى الساعة {$expires}\n"
+            . "💰 سعر الحجز: *{$priceText}* (يُخصم مرة واحدة)\n\n"
             . "🚗 عند وصولك سيؤكّد صاحب الموقف دخول سيارتك مباشرةً.\n"
             . "إذا لم تصل قبل الوقت المحدد سيتم إلغاء الحجز تلقائياً."
         );

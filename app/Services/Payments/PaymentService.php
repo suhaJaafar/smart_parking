@@ -4,6 +4,7 @@ namespace App\Services\Payments;
 
 use App\Bots\Contracts\BotNotifier;
 use App\Bots\Dto\OutboundReply;
+use App\Data\ParkData;
 use App\Enums\PaymentStatusTypes;
 use App\Models\Payment;
 use App\Models\Reserve;
@@ -50,10 +51,14 @@ class PaymentService
                 return $existing;
             }
 
+            // Flat, owner-defined fee charged once for this stay. Falls back
+            // to the default when a (legacy) park has no price configured.
+            $amount = (float) ($reserve->park?->price ?? ParkData::DEFAULT_PRICE);
+
             return Payment::create([
                 'reserve_id' => $reserve->id,
                 'user_id'    => $reserve->user_id,
-                'amount'     => 1000,
+                'amount'     => $amount,
                 'currency'   => config('services.qicard.currency'),
                 'status'     => PaymentStatusTypes::CREATED->value,
                 'request_id' => 'sp_' . Str::random(24),

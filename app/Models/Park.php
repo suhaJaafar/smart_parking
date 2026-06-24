@@ -17,6 +17,7 @@ class Park extends Model
         'name',
         'capacity',
         'free_spaces',
+        'price',
     ];
 
     protected function casts(): array
@@ -24,6 +25,7 @@ class Park extends Model
         return [
             'capacity'    => 'integer',
             'free_spaces' => 'integer',
+            'price'       => 'decimal:3',
         ];
     }
 
