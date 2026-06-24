@@ -177,7 +177,8 @@ class PaymentService
                      . "🅿️ الموقف: {$park->name}\n"
                      . "👤 العميل: {$customerName}\n"
                      . "💰 المبلغ: {$amount}\n"
-                     . "🔖 رقم العملية: {$ref}";
+                     . "🔖 رقم العملية: {$ref}\n\n"
+                     . "🚗 عند مغادرة السيارة، أكِّد خروجها من خيار \"إخراج سيارة\" .";
                 $this->notifier->notify($owner, OutboundReply::text($msg));
             }
         } catch (\Throwable $e) {
