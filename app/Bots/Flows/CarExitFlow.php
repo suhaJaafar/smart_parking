@@ -12,17 +12,29 @@ use App\Models\Park;
 use App\Services\CarService;
 use App\Services\ReservationService;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Throwable;
 
 /**
  * One-step flow for a SPACE_OWNER to take a car OUT of their park.
  *
- * Steps: plate → done.
+ * Steps: (pick) → plate → done.
+ *   • pick  -> only when the owner has more than one park: a tappable list
+ *              of their parks (annotated with how many cars are inside) so
+ *              they choose which park the car is leaving. Skipped for
+ *              single-park owners.
+ *   • plate -> the departing car's plate (prefix-number).
  */
 class CarExitFlow
 {
     public const FLOW = 'car_exit';
     private const TTL_MINUTES = 10;
+
+    /**
+     * Payload prefix for a "choose this park" row, shown only when the owner
+     * has more than one park. Full payload is "park:<parkId>".
+     */
+    private const PARK_OPTION_PREFIX = 'park:';
 
     public function __construct(
         private readonly CarService $carService,
@@ -45,6 +57,7 @@ class CarExitFlow
         }
 
         return match ($session->getStep()) {
+            'pick'  => $this->onPick($session, $message),
             'plate' => $this->finish($session, $message),
             default => OutboundReply::empty(),
         };
@@ -62,11 +75,76 @@ class CarExitFlow
             return OutboundReply::text("🚫 هذه العملية متاحة لمالكي المواقف فقط.");
         }
 
-        $park = $owner->ownedParks()->first();
-        if (!$park) {
+        /** @var \Illuminate\Support\Collection<int, Park> $parks */
+        $parks = $owner->ownedParks()->orderBy('created_at')->get();
+
+        if ($parks->isEmpty()) {
             return OutboundReply::text("🚫 لا يوجد موقف مسجل باسمك.");
         }
 
+        // A single park needs no disambiguation — ask for the plate directly.
+        if ($parks->count() === 1) {
+            return $this->promptPlateForPark($session, $parks->first());
+        }
+
+        // Multiple parks: let the owner tap which one the car is leaving
+        // from, each row annotated with how many cars are currently inside.
+        $options = [];
+        foreach ($parks as $park) {
+            $inside    = max(0, (int) $park->capacity - (int) $park->free_spaces);
+            $options[] = [
+                'id'          => self::PARK_OPTION_PREFIX . $park->id,
+                'title'       => "📍 {$park->name}",
+                'description' => "داخل الموقف: {$inside}",
+            ];
+        }
+
+        $session->update([
+            'flow'       => self::FLOW,
+            'step'       => 'pick',
+            'data'       => [],
+            'expires_at' => now()->addMinutes(self::TTL_MINUTES),
+        ]);
+
+        return OutboundReply::buttons(
+            body:       "🚙 *إخراج سيارة*\n\nاختر الموقف:",
+            options:    $options,
+            listButton: 'اختر الموقف',
+        );
+    }
+
+    /**
+     * Owner tapped a park row — resolve it (scoped to the owner) and ask for
+     * the departing car's plate.
+     */
+    private function onPick(BotSession $session, string $message): OutboundReply
+    {
+        $raw = trim($message);
+
+        if (!str_starts_with(mb_strtolower($raw), self::PARK_OPTION_PREFIX)) {
+            return OutboundReply::text(Prompt::ask("⚠️ اختر الموقف من القائمة أعلاه."));
+        }
+
+        $parkId = Str::after($raw, self::PARK_OPTION_PREFIX);
+        $owner  = $session->getUser();
+
+        $park = ($owner && Str::isUuid($parkId))
+            ? $owner->ownedParks()->whereKey($parkId)->first()
+            : null;
+
+        if (!$park) {
+            return OutboundReply::text(Prompt::ask("⚠️ اختر الموقف من القائمة أعلاه."));
+        }
+
+        return $this->promptPlateForPark($session, $park);
+    }
+
+    /**
+     * Lock the flow onto a concrete park and ask for the departing plate.
+     * Shared by the single-park and multi-park (post-pick) paths.
+     */
+    private function promptPlateForPark(BotSession $session, Park $park): OutboundReply
+    {
         $session->update([
             'flow'       => self::FLOW,
             'step'       => 'plate',
@@ -75,12 +153,27 @@ class CarExitFlow
         ]);
 
         return OutboundReply::text(
-            Prompt::ask("🚙 أرسل لوحة السيارة الخارجة (مثال: 11G-12345)")
+            Prompt::ask("🚙 أرسل لوحة السيارة الخارجة من *{$park->name}* (مثال: 11G-12345)")
         );
     }
 
     private function finish(BotSession $session, string $message): OutboundReply
     {
+        // Owner re-tapped a park button (Telegram keeps old inline buttons
+        // tappable) — switch to that park instead of treating it as a plate.
+        $raw = trim($message);
+        if (str_starts_with(mb_strtolower($raw), self::PARK_OPTION_PREFIX)) {
+            $owner  = $session->getUser();
+            $parkId = Str::after($raw, self::PARK_OPTION_PREFIX);
+            $picked = ($owner && Str::isUuid($parkId))
+                ? $owner->ownedParks()->whereKey($parkId)->first()
+                : null;
+
+            if ($picked) {
+                return $this->promptPlateForPark($session, $picked);
+            }
+        }
+
         // Delegate plate parsing (incl. Arabic-digit normalization and
         // optional separator) to the shared value object.
         $plate = CarPlate::fromString($message);

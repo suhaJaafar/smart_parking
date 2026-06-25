@@ -22,7 +22,11 @@ use Throwable;
 /**
  * Flow for a SPACE_OWNER to bring a car INTO their park.
  *
- * Steps: select_car → (plate) → done.
+ * Steps: (pick) → select_car → (plate) → done.
+ *   • pick       -> only when the owner has more than one park: a tappable
+ *                   list of their parks (annotated with the number of cars
+ *                   waiting and free spaces) so they choose which park to
+ *                   enter the car at. Skipped for single-park owners.
  *   • select_car -> every car with a pending reservation at this park is
  *                   listed as a tappable choice, labelled by plate (and the
  *                   customer's name). The owner taps the arriving vehicle
@@ -49,6 +53,12 @@ class CarEntryFlow
      */
     private const ENTRY_OPTION_PREFIX = 'enter:';
 
+    /**
+     * Payload prefix for a "choose this park" row, shown only when the owner
+     * has more than one park. Full payload is "park:<parkId>".
+     */
+    private const PARK_OPTION_PREFIX = 'park:';
+
     /** Arriving cars shown — WhatsApp lists allow at most 10 rows. */
     private const MAX_ARRIVING_CARS = 10;
 
@@ -74,6 +84,7 @@ class CarEntryFlow
         }
 
         return match ($session->getStep()) {
+            'pick'       => $this->onPick($session, $message),
             'select_car' => $this->afterCarChoice($session, $message),
             'plate'      => $this->afterPlate($session, $message),
             default      => OutboundReply::empty(),
@@ -92,11 +103,77 @@ class CarEntryFlow
             return OutboundReply::text("🚫 هذه العملية متاحة لمالكي المواقف فقط.");
         }
 
-        $park = $owner->ownedParks()->first();
-        if (!$park) {
+        /** @var \Illuminate\Support\Collection<int, Park> $parks */
+        $parks = $owner->ownedParks()->orderBy('created_at')->get();
+
+        if ($parks->isEmpty()) {
             return OutboundReply::text("🚫 لا يوجد موقف مسجل باسمك. أنشئ موقفاً أولاً.");
         }
 
+        // A single park needs no disambiguation — go straight to its cars.
+        if ($parks->count() === 1) {
+            return $this->beginForPark($session, $parks->first());
+        }
+
+        // Multiple parks: let the owner tap which one to enter a car at,
+        // each row annotated with how many cars are waiting and free spaces.
+        $options = [];
+        foreach ($parks as $park) {
+            $waiting   = $this->reservations->pendingCountForPark($park);
+            $options[] = [
+                'id'          => self::PARK_OPTION_PREFIX . $park->id,
+                'title'       => "📍 {$park->name}",
+                'description' => "بانتظار الدخول: {$waiting} • متاح: {$park->free_spaces}",
+            ];
+        }
+
+        $session->update([
+            'flow'       => self::FLOW,
+            'step'       => 'pick',
+            'data'       => [],
+            'expires_at' => now()->addMinutes(self::TTL_MINUTES),
+        ]);
+
+        return OutboundReply::buttons(
+            body:       "🚗 *إدخال سيارة*\n\nاختر الموقف:",
+            options:    $options,
+            listButton: 'اختر الموقف',
+        );
+    }
+
+    /**
+     * Owner tapped a park row — resolve it (scoped to the owner) and present
+     * that park's arriving cars.
+     */
+    private function onPick(BotSession $session, string $message): OutboundReply
+    {
+        $raw = trim($message);
+
+        if (!str_starts_with(mb_strtolower($raw), self::PARK_OPTION_PREFIX)) {
+            return OutboundReply::text(Prompt::ask("⚠️ اختر الموقف من القائمة أعلاه."));
+        }
+
+        $parkId = Str::after($raw, self::PARK_OPTION_PREFIX);
+        $owner  = $session->getUser();
+
+        $park = ($owner && Str::isUuid($parkId))
+            ? $owner->ownedParks()->whereKey($parkId)->first()
+            : null;
+
+        if (!$park) {
+            return OutboundReply::text(Prompt::ask("⚠️ اختر الموقف من القائمة أعلاه."));
+        }
+
+        return $this->beginForPark($session, $park);
+    }
+
+    /**
+     * Lock the flow onto a concrete park and present its arriving cars.
+     * Shared by the single-park and multi-park (post-pick) paths so they
+     * behave identically from here on.
+     */
+    private function beginForPark(BotSession $session, Park $park): OutboundReply
+    {
         $session->update([
             'flow'       => self::FLOW,
             'step'       => 'select_car',
@@ -184,13 +261,26 @@ class CarEntryFlow
         $raw   = trim($message);
         $lower = mb_strtolower($raw);
 
-        // A tapped arriving-car choice — the only path.
         if (str_starts_with($lower, self::ENTRY_OPTION_PREFIX)) {
             return $this->enterFromChoice(
                 $session,
                 $park,
                 Str::after($raw, self::ENTRY_OPTION_PREFIX),
             );
+        }
+
+        // Owner re-tapped a park button (Telegram keeps old inline buttons
+        // tappable) — switch to that park's arriving cars instead of erroring.
+        if (str_starts_with($lower, self::PARK_OPTION_PREFIX)) {
+            $owner  = $session->getUser();
+            $parkId = Str::after($raw, self::PARK_OPTION_PREFIX);
+            $picked = ($owner && Str::isUuid($parkId))
+                ? $owner->ownedParks()->whereKey($parkId)->first()
+                : null;
+
+            if ($picked) {
+                return $this->beginForPark($session, $picked);
+            }
         }
 
         return OutboundReply::text(

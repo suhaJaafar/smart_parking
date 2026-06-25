@@ -115,7 +115,7 @@ class PreBookingFlow
         // Collect the customer's phone once before showing parks so the
         // owner can reach them (skipped if already known).
         if ($this->needsPhone($session->getUser())) {
-            return $this->startPhoneGate($session, $lat, $lng, self::TTL_MINUTES);
+            return $this->startPhoneGate($session, ['lat' => $lat, 'lng' => $lng], self::TTL_MINUTES);
         }
 
         return $this->showParks($session, $lat, $lng);

@@ -95,19 +95,14 @@ class NearbyParksFlow
             );
         }
 
-        // The space owner needs a way to reach the customer — collect the
-        // phone number once before showing parks (skipped if already known,
-        // e.g. WhatsApp users whose number is their wa_id).
-        if ($this->needsPhone($session->getUser())) {
-            return $this->startPhoneGate($session, $lat, $lng, self::TTL_MINUTES);
-        }
-
+        // Show the nearby parks first; the phone number is only requested
+        // once the customer actually picks a park to reserve (see reserve()).
         return $this->showParks($session, $lat, $lng);
     }
 
     /**
      * Resume after the phone step: still collecting → return its reply;
-     * captured → continue the park search with the stashed coordinates.
+     * captured → complete the reservation for the park the customer picked.
      */
     private function onPhoneStep(BotSession $session, string $message): OutboundReply
     {
@@ -116,7 +111,13 @@ class NearbyParksFlow
             return $result;
         }
 
-        return $this->showParks($session, $result['lat'], $result['lng']);
+        $park = Park::find($result['id'] ?? null);
+        if (!$park) {
+            $session->reset();
+            return OutboundReply::text("❌ لم يعد هذا الموقف متاحاً.");
+        }
+
+        return $this->completeReservation($session, $park, $result);
     }
 
     private function showParks(BotSession $session, float $lat, float $lng): OutboundReply
@@ -195,6 +196,29 @@ class NearbyParksFlow
             return OutboundReply::text("❌ لم يعد هذا الموقف متاحاً.");
         }
 
+        // Now that a park is chosen, collect the customer's phone (once) so
+        // the owner can reach them. Skipped if already known (e.g. WhatsApp).
+        if ($this->needsPhone($session->getUser())) {
+            return $this->startPhoneGate(
+                $session,
+                $choice,
+                self::TTL_MINUTES,
+                "⚠️ _لن تتمكن من إجراء حجز بدون مشاركة رقم هاتفك._"
+            );
+        }
+
+        return $this->completeReservation($session, $park, $choice);
+    }
+
+    /**
+     * Place the reservation for the chosen park, notify the owner and return
+     * the customer's success message. Reached either directly (phone already
+     * on file) or after the phone gate resolves.
+     *
+     * @param array{id:string,name:string,lat:float,lng:float,free_spaces?:int} $choice
+     */
+    private function completeReservation(BotSession $session, Park $park, array $choice): OutboundReply
+    {
         try {
             $reserve = $this->reservations->reserve($session->getUser(), $park);
         } catch (RuntimeException $e) {

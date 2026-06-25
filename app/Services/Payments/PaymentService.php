@@ -152,19 +152,22 @@ class PaymentService
         }
 
         $amount = number_format((float) $payment->amount, 0) . ' ' . $payment->currency;
-        $ref    = $payment->payment_id ?? $payment->request_id;
         $park   = $reserve->park;
 
         // Customer
         try {
             $customer = $reserve->user;
             if ($customer && $park) {
+                $receiptUrl = route('payments.receipt', $payment->token);
                 $msg = "✅ تم استلام دفعتك بنجاح.\n\n"
                      . "🅿️ الموقف: {$park->name}\n"
-                     . "💰 المبلغ: {$amount}\n"
-                     . "🔖 رقم العملية: {$ref}\n\n"
+                     . "💰 المبلغ: {$amount}\n\n"
+                     . "🧾 لتحميل وصل الدفع اضغط هنا 👇\n\n"
                      . "شكراً لاستخدامك Smart Parking.";
-                $this->notifier->notify($customer, OutboundReply::text($msg));
+                $this->notifier->notify(
+                    $customer,
+                    OutboundReply::ctaUrl($msg, '🧾 تحميل وصل الدفع', $receiptUrl)
+                );
             }
         } catch (\Throwable $e) {
             Log::error('Payment success notify (customer) failed', [
@@ -181,8 +184,7 @@ class PaymentService
                 $msg = "💳 تم استلام دفعة جديدة في موقفك.\n\n"
                      . "🅿️ الموقف: {$park->name}\n"
                      . "👤 العميل: {$customerName}\n"
-                     . "💰 المبلغ: {$amount}\n"
-                     . "🔖 رقم العملية: {$ref}\n\n"
+                     . "💰 المبلغ: {$amount}\n\n"
                      . "🚗 عند مغادرة السيارة، أكِّد خروجها من خيار \"إخراج سيارة\" .";
                 $this->notifier->notify($owner, OutboundReply::text($msg));
             }

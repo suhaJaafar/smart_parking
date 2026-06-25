@@ -85,6 +85,32 @@ class PaymentController extends Controller
             : view('payments.failed',  ['payment' => $payment]);
     }
 
+    /**
+     * Printable receipt for a settled payment. The customer reaches this
+     * from the "تحميل وصل الدفع" button in their success notification. The
+     * unguessable `token` is the access key — no auth required, mirroring
+     * the existing `/pay/{token}` flow. A receipt only exists for a payment
+     * that actually went through, so unpaid rows get a friendly notice.
+     */
+    public function receipt(string $token)
+    {
+        $payment = Payment::where('token', $token)
+            ->with(['reserve.park', 'reserve.user'])
+            ->first();
+
+        if (!$payment) {
+            return view('payments.error', ['message' => 'وصل الدفع غير موجود.']);
+        }
+
+        if (!$payment->isPaid()) {
+            return view('payments.error', [
+                'message' => 'لا يتوفر وصل دفع لهذه العملية بعد. يصبح الوصل متاحاً بعد إتمام الدفع.',
+            ]);
+        }
+
+        return view('payments.receipt', ['payment' => $payment]);
+    }
+
     public function webhook(Request $request)
     {
         // Qi POSTs the payment object here. We never trust the body — we
