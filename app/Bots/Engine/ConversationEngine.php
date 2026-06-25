@@ -798,7 +798,7 @@ class ConversationEngine
             return OutboundReply::ctaUrl(
                 body:    "📍 *موقفك المسجّل:*\n\n" . $body,
                 ctaText: '🗺️ عرض الموقع',
-                url:     "https://www.google.com/maps?q={$park->lat},{$park->lng}",
+                url:     "https://www.google.com/maps?q={$park->location?->latitude},{$park->location?->longitude}",
             );
         }
 
@@ -847,7 +847,7 @@ class ConversationEngine
         return OutboundReply::ctaUrl(
             body:    "📍 *تفاصيل الموقف:*\n\n" . $this->parkInfo($park, withIndex: null, withMapUrl: false),
             ctaText: '🗺️ عرض الموقع',
-            url:     "https://www.google.com/maps?q={$park->lat},{$park->lng}",
+            url:     "https://www.google.com/maps?q={$park->location?->latitude},{$park->location?->longitude}",
         );
     }
 
@@ -864,7 +864,7 @@ class ConversationEngine
             $line .= "   المدينة: {$city}\n";
         }
         if ($withMapUrl) {
-            $line .= "   📍 [الموقع على الخريطة](https://www.google.com/maps?q={$park->lat},{$park->lng})";
+            $line .= "   📍 [الموقع على الخريطة](https://www.google.com/maps?q={$park->location?->latitude},{$park->location?->longitude})";
         }
 
         return rtrim($line);
