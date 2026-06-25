@@ -18,6 +18,7 @@ use App\Enums\RoleTypes;
 use App\Models\Park;
 use App\Models\Reserve;
 use App\Services\ReservationService;
+use Illuminate\Support\Str;
 
 /**
  * Channel-agnostic brain of the bot.
@@ -77,6 +78,12 @@ class ConversationEngine
         'my park', 'my parks', 'parks', 'parks list',
         'موقفي', 'مواقفي', 'مواقف', 'مواقف كراجي', 'مواقف الكراجات',
     ];
+
+    /**
+     * Callback payload prefix for a tapped park row in the *مواقفي* list.
+     * Full payload is "mypark:<parkId>"; tapping shows that park's details.
+     */
+    private const MY_PARK_DETAIL_PREFIX = 'mypark:';
 
     /** Show the command cheat-sheet at any time. */
     private const HELP_COMMANDS = [
@@ -210,6 +217,14 @@ class ConversationEngine
 
             if (in_array($lower, self::MY_PARKS_COMMANDS, true)) {
                 return $this->myParks($session);
+            }
+
+            // A tapped park row from the *مواقفي* list → show its details.
+            if (str_starts_with($lower, self::MY_PARK_DETAIL_PREFIX)) {
+                return $this->myParkDetail(
+                    $session,
+                    Str::after($msg, self::MY_PARK_DETAIL_PREFIX),
+                );
             }
 
             // Rename command: "اسمي <new name>" or "name <new name>".
@@ -783,17 +798,57 @@ class ConversationEngine
             return OutboundReply::ctaUrl(
                 body:    "📍 *موقفك المسجّل:*\n\n" . $body,
                 ctaText: '🗺️ عرض الموقع',
-                url:     "https://www.google.com/maps?q={$park->lat},{$park->lng}",
+                url:     "https://www.google.com/maps?q={$park->location?->latitude},{$park->location?->longitude}",
             );
         }
 
-        $lines = ["📍 *مواقفك المسجّلة* (" . $parks->count() . "):", ''];
-        foreach ($parks as $i => $park) {
-            $lines[] = $this->parkInfo($park, withIndex: $i + 1, withMapUrl: true);
-            $lines[] = '';
+        $lines = ["📍 *مواقفك المسجّلة* (" . $parks->count() . "):", '', 'اختر موقفاً لعرض تفاصيله:'];
+
+        $currency = config('services.qicard.currency');
+        $options  = [];
+        foreach ($parks as $park) {
+            $price     = number_format((float) $park->price, 0) . ' ' . $currency;
+            $options[] = [
+                'id'          => self::MY_PARK_DETAIL_PREFIX . $park->id,
+                'title'       => "📍 {$park->name}",
+                'description' => "متاح: {$park->free_spaces}/{$park->capacity} • 💰 {$price}",
+            ];
         }
 
-        return OutboundReply::text(rtrim(implode("\n", $lines)));
+        return OutboundReply::buttons(
+            body:       implode("\n", $lines),
+            options:    $options,
+            listButton: 'عرض المواقف',
+        );
+    }
+
+    /**
+     * Show the full details of one owned park, opened by tapping its row in
+     * the *مواقفي* list. Scoped to the requesting owner so a stray payload
+     * can never reveal someone else's park.
+     */
+    private function myParkDetail(BotSession $session, string $parkId): OutboundReply
+    {
+        $user = $session->getUser();
+        if (!$user) {
+            return OutboundReply::text("📱 حسابك غير مسجل في النظام.");
+        }
+
+        if (!Str::isUuid($parkId)) {
+            return OutboundReply::text("❌ اختيار غير صالح.");
+        }
+
+        /** @var Park|null $park */
+        $park = $user->ownedParks()->with('location')->whereKey($parkId)->first();
+        if (!$park) {
+            return OutboundReply::text("❌ لم يعد هذا الموقف متاحاً.");
+        }
+
+        return OutboundReply::ctaUrl(
+            body:    "📍 *تفاصيل الموقف:*\n\n" . $this->parkInfo($park, withIndex: null, withMapUrl: false),
+            ctaText: '🗺️ عرض الموقع',
+            url:     "https://www.google.com/maps?q={$park->location?->latitude},{$park->location?->longitude}",
+        );
     }
 
     private function parkInfo(Park $park, ?int $withIndex, bool $withMapUrl): string
@@ -809,7 +864,7 @@ class ConversationEngine
             $line .= "   المدينة: {$city}\n";
         }
         if ($withMapUrl) {
-            $line .= "   📍 [الموقع على الخريطة](https://www.google.com/maps?q={$park->lat},{$park->lng})";
+            $line .= "   📍 [الموقع على الخريطة](https://www.google.com/maps?q={$park->location?->latitude},{$park->location?->longitude})";
         }
 
         return rtrim($line);

@@ -463,4 +463,16 @@ class ReservationService
             ->take($limit)
             ->get();
     }
+
+    /**
+     * Number of cars still waiting to be entered (pending holds) at a park.
+     * Lightweight COUNT used to annotate the park picker when an owner has
+     * more than one park.
+     */
+    public function pendingCountForPark(Park $park): int
+    {
+        return Reserve::where('park_id', $park->id)
+            ->where('status', Reserve::STATUS_START)
+            ->count();
+    }
 }

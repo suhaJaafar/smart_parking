@@ -182,7 +182,7 @@ class ParkCreationFlow
         return OutboundReply::ctaUrl(
             body:    $body,
             ctaText: '🗺️ عرض الموقع',
-            url:     "https://www.google.com/maps?q={$park->lat},{$park->lng}",
+            url:     "https://www.google.com/maps?q={$lat},{$lng}",
         );
     }
 

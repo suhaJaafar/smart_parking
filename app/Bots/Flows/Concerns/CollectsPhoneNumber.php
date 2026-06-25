@@ -39,14 +39,18 @@ trait CollectsPhoneNumber
     }
 
     /**
-     * Enter the phone-collection step, stashing the parsed coordinates so the
-     * park search can resume once the number arrives. Returns the yes/no
-     * permission prompt.
+     * Enter the phone-collection step, stashing an arbitrary resume payload
+     * so the caller can continue exactly where it left off once the number
+     * arrives. An optional $notice line is appended to the prompt (e.g. a
+     * warning that the reservation cannot proceed without a number).
+     *
+     * @param array<string, mixed> $resume Opaque payload handed back to the
+     *        caller once the number is captured.
      */
-    protected function startPhoneGate(BotSession $session, float $lat, float $lng, int $ttlMinutes): OutboundReply
+    protected function startPhoneGate(BotSession $session, array $resume, int $ttlMinutes, ?string $notice = null): OutboundReply
     {
         $data = $session->getData();
-        $data['pending_coords'] = ['lat' => $lat, 'lng' => $lng];
+        $data['phone_resume'] = $resume;
 
         $session->update([
             'step'       => self::PHONE_STEP,
@@ -54,17 +58,24 @@ trait CollectsPhoneNumber
             'expires_at' => now()->addMinutes($ttlMinutes),
         ]);
 
-        return $this->phonePermissionPrompt();
+        return $this->phonePermissionPrompt($notice);
     }
 
     /**
-     * The two-option (yes / no) share-permission prompt.
+     * The two-option (yes / no) share-permission prompt. An optional $notice
+     * line is appended below the question.
      */
-    protected function phonePermissionPrompt(): OutboundReply
+    protected function phonePermissionPrompt(?string $notice = null): OutboundReply
     {
+        $body = "📱 لإتمام الحجز نحتاج رقم هاتفك ليتمكن صاحب الموقف من التواصل معك عند الحاجة.\n\n"
+              . "هل تسمح بمشاركة رقمك؟";
+
+        if ($notice !== null && $notice !== '') {
+            $body .= "\n\n" . $notice;
+        }
+
         return OutboundReply::buttons(
-            body: "📱 لإتمام الحجز نحتاج رقم هاتفك ليتمكن صاحب الموقف من التواصل معك عند الحاجة.\n\n"
-                . "هل تسمح بمشاركة رقمك؟",
+            body: $body,
             options: [
                 ['id' => self::PHONE_YES, 'title' => '✅ نعم، مشاركة رقمي'],
                 ['id' => self::PHONE_NO,  'title' => '❌ لا'],
@@ -77,10 +88,11 @@ trait CollectsPhoneNumber
      *
      * Returns either:
      *   - an {@see OutboundReply} → still collecting (re-prompt / request contact)
-     *   - array{lat: float, lng: float} → number captured & stored; the caller
-     *     should resume the park search with these coordinates.
+     *   - array<string, mixed> → number captured & stored; the value is the
+     *     resume payload the caller passed to {@see self::startPhoneGate()},
+     *     so it can continue where it left off.
      *
-     * @return OutboundReply|array{lat: float, lng: float}
+     * @return OutboundReply|array<string, mixed>
      */
     protected function handlePhoneStep(BotSession $session, string $message): OutboundReply|array
     {
@@ -107,13 +119,13 @@ trait CollectsPhoneNumber
         if (is_string($digits) && strlen($digits) >= self::PHONE_MIN_DIGITS) {
             $session->getUser()?->forceFill(['phone_number' => $digits])->save();
 
-            $coords = $session->getData()['pending_coords'] ?? null;
-            if (!is_array($coords) || !isset($coords['lat'], $coords['lng'])) {
+            $resume = $session->getData()['phone_resume'] ?? null;
+            if (!is_array($resume)) {
                 $session->reset();
-                return OutboundReply::text("📍 شارك موقعك من جديد لإكمال الحجز.");
+                return OutboundReply::text("⚠️ انتهت الجلسة. ابدأ العملية من جديد.");
             }
 
-            return ['lat' => (float) $coords['lat'], 'lng' => (float) $coords['lng']];
+            return $resume;
         }
 
         // Unrecognised input while waiting for the number — re-prompt.
