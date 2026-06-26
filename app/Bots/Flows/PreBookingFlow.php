@@ -575,7 +575,7 @@ class PreBookingFlow
     private function formatSchedule(\DateTimeInterface $when): string
     {
         $when = Carbon::instance($when)->setTimezone(config('app.timezone'));
-        $time = $when->format('H:i');
+        $time = $when->format('h:i A');
 
         $label = match (true) {
             $when->isToday()    => "اليوم {$time}",

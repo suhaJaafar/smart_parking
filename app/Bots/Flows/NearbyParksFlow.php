@@ -235,7 +235,7 @@ class NearbyParksFlow
         // notify the park owner about the new reservation.
         $this->notifyOwner($reserve, $park);
 
-        $expires = $reserve->expires_at->setTimezone(config('app.timezone'))->format('H:i');
+        $expires = $reserve->expires_at->setTimezone(config('app.timezone'))->format('h:i A');
         $mapsUrl = sprintf('https://www.google.com/maps?q=%F,%F', $choice['lat'], $choice['lng']);
         $priceText = number_format((float) $park->price, 0) . ' ' . config('services.qicard.currency');
 
@@ -267,7 +267,7 @@ class NearbyParksFlow
             $customerPhone = $customer?->phone_number;
 
             $expires = $reserve->expires_at
-                ? $reserve->expires_at->setTimezone(config('app.timezone'))->format('H:i')
+                ? $reserve->expires_at->setTimezone(config('app.timezone'))->format('h:i A')
                 : '—';
 
             $contactLine = $customerPhone ? "📱 هاتف الزبون: *+{$customerPhone}*\n" : '';
