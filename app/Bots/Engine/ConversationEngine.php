@@ -44,6 +44,7 @@ class ConversationEngine
     private const ESCAPE_COMMANDS = [
         '0', 'cancel', 'الغاء', 'إلغاء',
         'menu', 'القائمة',
+        'start', 'بدء', 'ابدأ', 'ابدا',
         '9',
         'restart', 'اعادة', 'إعادة',
     ];

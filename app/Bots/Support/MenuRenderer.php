@@ -100,7 +100,7 @@ class MenuRenderer
         }
 
         $expires = $reserve->expires_at
-            ? $reserve->expires_at->setTimezone(config('app.timezone'))->format('H:i')
+            ? $reserve->expires_at->setTimezone(config('app.timezone'))->format('h:i A')
             : '—';
 
         return "�️ *حجز فعّال:* {$reserve->park->name}\n"

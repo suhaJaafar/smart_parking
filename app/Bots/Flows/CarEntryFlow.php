@@ -458,7 +458,7 @@ class CarEntryFlow
         $body = $headline . "\n\n"
               . "📍 الموقف: {$park->name}\n"
               . "🚗 اللوحة: {$car->plate_prefix}-{$car->car_number}\n"
-              . "🕒 وقت الدخول: " . now()->setTimezone(config('app.timezone'))->format('Y-m-d H:i');
+              . "🕒 وقت الدخول: " . now()->setTimezone(config('app.timezone'))->format('Y-m-d h:i A');
 
         if ($reserve) {
             $payment = $reserve->payments()
