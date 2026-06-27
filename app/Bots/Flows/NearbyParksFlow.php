@@ -168,6 +168,17 @@ class NearbyParksFlow
         $body = "📍 أقرب المواقف الفارغة إليك:\n\n"
               . "اختر الموقف الذي تريد الحجز فيه، أو أرسل *0* للإلغاء.";
 
+        if($parks->count() === 1){
+            return OutboundReply::buttons(
+                body:       $body,
+                options:    $options,
+                listButton: 'اختر الموقف',
+                linkButton: [
+                    'title' => '🗺️ عرض الموقف على الخريطة',
+                    'url'   => $this->buildAllOnMapUrl($parks, $lat, $lng),
+                ],
+            );
+        }
         return OutboundReply::buttons(
             body:       $body,
             options:    $options,
@@ -181,12 +192,20 @@ class NearbyParksFlow
 
     private function reserve(BotSession $session, string $message): OutboundReply
     {
+        // The customer can refine their search at any time by sharing a new
+        // location while the list is open — refresh the nearby parks instead
+        // of treating the coordinates as an (invalid) menu choice.
+        [$lat, $lng] = $this->parseCoords(trim($message));
+        if ($lat !== null && $lng !== null) {
+            return $this->showParks($session, $lat, $lng);
+        }
+
         $catalog = $session->getData()['parks'] ?? [];
         $choice  = $this->resolveParkChoice(trim($message), $catalog);
 
         if (!$choice) {
             return OutboundReply::text(
-                Prompt::ask("⚠️ اختر موقفاً من الأزرار في القائمة أعلاه.")
+                Prompt::ask("⚠️ اختر أحد المواقف أعلاه، أو شارك موقعك من جديد لتحديث القائمة.")
             );
         }
 
