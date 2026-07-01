@@ -3,7 +3,9 @@
 namespace App\Bots\Flows;
 
 use App\Bots\Contracts\BotSession;
+use App\Bots\Contracts\PlateRecognizer;
 use App\Bots\Dto\OutboundReply;
+use App\Bots\Flows\Concerns\AcceptsPlateImage;
 use App\Bots\Support\Prompt;
 use App\Data\CarPlate;
 use App\Enums\RoleTypes;
@@ -27,6 +29,8 @@ use Throwable;
  */
 class CarExitFlow
 {
+    use AcceptsPlateImage;
+
     public const FLOW = 'car_exit';
     private const TTL_MINUTES = 10;
 
@@ -36,9 +40,13 @@ class CarExitFlow
      */
     private const PARK_OPTION_PREFIX = 'park:';
 
+    /** Callback payload for confirming an OCR-detected plate. */
+    private const PLATE_CONFIRM = 'plate_confirm';
+
     public function __construct(
         private readonly CarService $carService,
         private readonly ReservationService $reservations,
+        private readonly PlateRecognizer $plates,
     ) {}
 
     public function handle(BotSession $session, string $message): OutboundReply
@@ -57,9 +65,10 @@ class CarExitFlow
         }
 
         return match ($session->getStep()) {
-            'pick'  => $this->onPick($session, $message),
-            'plate' => $this->finish($session, $message),
-            default => OutboundReply::empty(),
+            'pick'          => $this->onPick($session, $message),
+            'plate'         => $this->finish($session, $message),
+            'confirm_plate' => $this->onPlateConfirm($session, $message),
+            default         => OutboundReply::empty(),
         };
     }
 
@@ -153,7 +162,10 @@ class CarExitFlow
         ]);
 
         return OutboundReply::text(
-            Prompt::ask("🚙 أرسل لوحة السيارة الخارجة من *{$park->name}* (مثال: 11G-12345)")
+            Prompt::ask(
+                "🚙 أرسل لوحة السيارة الخارجة من *{$park->name}*، أو أرسل *صورة* للوحة.\n"
+                . "مثال: 11G-12345"
+            )
         );
     }
 
@@ -174,15 +186,108 @@ class CarExitFlow
             }
         }
 
+        // Plate photo → OCR → ask the owner to confirm/correct the read.
+        if ($this->isImagePayload($raw)) {
+            $plate = $this->plates->recognize($this->imageUrl($raw));
+            if ($plate === null) {
+                return OutboundReply::text(
+                    Prompt::ask(
+                        "⚠️ تعذّر قراءة اللوحة من الصورة.\n"
+                        . "أرسل صورة أوضح، أو اكتب اللوحة يدوياً. مثال: 11G-12345"
+                    )
+                );
+            }
+
+            return $this->askPlateConfirmation($session, $plate);
+        }
+
         // Delegate plate parsing (incl. Arabic-digit normalization and
         // optional separator) to the shared value object.
         $plate = CarPlate::fromString($message);
         if ($plate === null) {
             return OutboundReply::text(
-                Prompt::ask("⚠️ صيغة اللوحة غير صحيحة. مثال: 11G-12345")
+                Prompt::ask(
+                    "⚠️ صيغة اللوحة غير صحيحة. مثال: 11G-12345\n"
+                    . "أو أرسل صورة واضحة للوحة."
+                )
             );
         }
 
+        return $this->processExit($session, $plate);
+    }
+
+    /**
+     * Show the OCR-detected plate and wait for the owner to confirm it, type
+     * a correction, or send a clearer photo.
+     */
+    private function askPlateConfirmation(BotSession $session, CarPlate $plate): OutboundReply
+    {
+        $session->update([
+            'data'       => array_merge($session->getData(), ['ocr_plate' => (string) $plate]),
+            'step'       => 'confirm_plate',
+            'expires_at' => now()->addMinutes(self::TTL_MINUTES),
+        ]);
+
+        return OutboundReply::buttons(
+            body: "🔍 قرأنا اللوحة: *{$plate}*\n\n"
+                . "إن كانت صحيحة اضغط للتأكيد، أو اكتب اللوحة الصحيحة، أو أرسل صورة أوضح.",
+            options: [
+                ['id' => self::PLATE_CONFIRM, 'title' => "✅ تأكيد {$plate}"],
+            ],
+            listButton: 'تأكيد',
+        );
+    }
+
+    /**
+     * Resolve the confirm step: a tapped confirmation uses the stored plate;
+     * a typed plate or a new photo overrides it.
+     */
+    private function onPlateConfirm(BotSession $session, string $message): OutboundReply
+    {
+        $raw = trim($message);
+
+        if ($raw === self::PLATE_CONFIRM) {
+            $stored = $session->getData()['ocr_plate'] ?? null;
+            $plate  = is_string($stored) ? CarPlate::fromString($stored) : null;
+
+            if ($plate === null) {
+                $session->update(['step' => 'plate']);
+                return OutboundReply::text(
+                    Prompt::ask("🚙 أرسل لوحة السيارة الخارجة. مثال: 11G-12345")
+                );
+            }
+
+            return $this->processExit($session, $plate);
+        }
+
+        if ($this->isImagePayload($raw)) {
+            $plate = $this->plates->recognize($this->imageUrl($raw));
+            if ($plate === null) {
+                return OutboundReply::text(
+                    Prompt::ask("⚠️ تعذّر قراءة اللوحة. أرسل صورة أوضح أو اكتب اللوحة يدوياً.")
+                );
+            }
+
+            return $this->askPlateConfirmation($session, $plate);
+        }
+
+        $plate = CarPlate::fromString($raw);
+        if ($plate === null) {
+            return OutboundReply::text(
+                Prompt::ask("⚠️ صيغة اللوحة غير صحيحة. اكتب اللوحة الصحيحة أو اضغط تأكيد.")
+            );
+        }
+
+        return $this->processExit($session, $plate);
+    }
+
+    /**
+     * Look the plate up inside the locked park and check the car out,
+     * closing the customer's ACTIVE reservation. Shared by the typed-plate,
+     * photo-confirm and correction paths.
+     */
+    private function processExit(BotSession $session, CarPlate $plate): OutboundReply
+    {
         $data    = $session->getData();
         $parkId  = $data['park_id'] ?? null;
 

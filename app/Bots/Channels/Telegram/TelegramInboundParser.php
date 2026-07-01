@@ -5,6 +5,8 @@ namespace App\Bots\Channels\Telegram;
 use App\Bots\Engine\ConversationEngine;
 use App\Enums\RoleTypes;
 use App\Models\User;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Pulls the Telegram-native webhook payload apart and normalises it into
@@ -85,6 +87,20 @@ class TelegramInboundParser
             ];
         }
 
+        // Photo (or an image sent as a file) — used by owner flows to OCR a
+        // car plate. Resolve the largest size to a directly downloadable URL
+        // so the flow can hand it to the plate recogniser. The marker prefix
+        // lets the flow tell an image apart from typed text.
+        $fileId = $this->imageFileId($message);
+        if ($fileId !== null) {
+            return [
+                'chat_id' => (string) $chatId,
+                'type'    => ConversationEngine::TYPE_IMAGE,
+                'text'    => ConversationEngine::IMAGE_PAYLOAD_PREFIX . ($this->resolveFileUrl($fileId) ?? ''),
+                'name'    => $name,
+            ];
+        }
+
         $text = (string) ($message['text'] ?? '');
         if ($text === '') {
             return null;
@@ -124,6 +140,68 @@ class TelegramInboundParser
         $username = trim((string) ($from['username'] ?? ''));
 
         return $username !== '' ? $username : null;
+    }
+
+    /**
+     * Pull the best image `file_id` from a message: the largest size of a
+     * `photo`, or an image-typed `document` (when the user sends the plate
+     * picture "as a file"). Null when the message carries no image.
+     *
+     * @param array<string, mixed> $message
+     */
+    private function imageFileId(array $message): ?string
+    {
+        // `photo` is an array of progressively larger sizes — last is biggest.
+        if (isset($message['photo']) && is_array($message['photo']) && $message['photo'] !== []) {
+            $largest = end($message['photo']);
+            $id      = $largest['file_id'] ?? null;
+
+            return is_string($id) ? $id : null;
+        }
+
+        // An image sent as a document/file attachment.
+        $document = $message['document'] ?? null;
+        if (is_array($document)
+            && str_starts_with((string) ($document['mime_type'] ?? ''), 'image/')
+        ) {
+            $id = $document['file_id'] ?? null;
+
+            return is_string($id) ? $id : null;
+        }
+
+        return null;
+    }
+
+    /**
+     * Exchange a Telegram `file_id` for a directly downloadable URL via the
+     * Bot API `getFile` method. Returns null on any failure so the caller
+     * degrades to manual plate entry.
+     */
+    private function resolveFileUrl(string $fileId): ?string
+    {
+        $token = config('services.telegram.bot_token');
+        $base  = config('services.telegram.api_base_url', 'https://api.telegram.org');
+
+        if (!is_string($token) || $token === '') {
+            return null;
+        }
+
+        try {
+            $response = Http::timeout(10)->get("{$base}/bot{$token}/getFile", [
+                'file_id' => $fileId,
+            ]);
+
+            $path = $response->json('result.file_path');
+            if (!is_string($path) || $path === '') {
+                return null;
+            }
+
+            return "{$base}/file/bot{$token}/{$path}";
+        } catch (\Throwable $e) {
+            Log::warning('Telegram getFile failed', ['error' => $e->getMessage()]);
+
+            return null;
+        }
     }
 
     /**

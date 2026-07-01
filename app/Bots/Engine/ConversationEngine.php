@@ -39,6 +39,16 @@ class ConversationEngine
     /** Inbound message types the engine understands. */
     public const TYPE_TEXT     = 'text';
     public const TYPE_LOCATION = 'location';
+    public const TYPE_IMAGE    = 'image';
+
+    /**
+     * Marker prefixing the (channel-resolved) download URL of an inbound
+     * image, e.g. "bot-image::https://…". Lets a flow tell a photo apart
+     * from typed text without threading the message type through every
+     * flow signature. Set by the channel parser, consumed by the flows
+     * that accept an image (e.g. car plate OCR).
+     */
+    public const IMAGE_PAYLOAD_PREFIX = 'bot-image::';
 
     /** Cancel / restart — anything that should drop the user back to the menu. */
     private const ESCAPE_COMMANDS = [

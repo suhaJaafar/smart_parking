@@ -3,6 +3,8 @@
 namespace App\Providers;
 
 use App\Bots\Contracts\BotNotifier;
+use App\Bots\Contracts\PlateRecognizer;
+use App\Bots\Support\PlateRecognizerClient;
 use App\Bots\Support\UserNotifier;
 use App\Repositories\Contracts\LocationRepositoryInterface;
 use App\Repositories\Contracts\ParkRepositoryInterface;
@@ -23,6 +25,10 @@ class AppServiceProvider extends ServiceProvider
         // Bot subsystem — channel-agnostic notifier fans out across every
         // channel a user is enrolled in (WhatsApp, Telegram, …).
         $this->app->bind(BotNotifier::class, UserNotifier::class);
+
+        // License-plate OCR for owners who photograph a plate instead of
+        // typing it. Fails soft to manual entry when no token is set.
+        $this->app->bind(PlateRecognizer::class, PlateRecognizerClient::class);
     }
 
     /**

@@ -65,4 +65,23 @@ return [
         'public_url'  => env('QICARD_PUBLIC_URL'),
     ],
 
+    'platerecognizer' => [
+        // API token from https://app.platerecognizer.com (Snapshot Cloud API).
+        // When empty, plate-image OCR is disabled and owners type the plate.
+        'token'     => env('PLATE_RECOGNIZER_TOKEN'),
+
+        // Recognition endpoint. Override only for a self-hosted SDK.
+        'endpoint'  => env('PLATE_RECOGNIZER_ENDPOINT', 'https://api.platerecognizer.com/v1/plate-reader/'),
+
+        // Optional region hint to bias recognition. Leave empty to let the
+        // engine auto-detect. NOTE: Iraq ("iq") is NOT a supported region code
+        // on Plate Recognizer — sending it makes every request fail with
+        // HTTP 400 ("Region \"iq\" does not exist"), so the default is blank.
+        'regions'   => env('PLATE_RECOGNIZER_REGIONS', ''),
+
+        // Reject reads below this confidence (0..1) so a blurry guess falls
+        // back to manual entry instead of saving a wrong plate.
+        'min_score' => (float) env('PLATE_RECOGNIZER_MIN_SCORE', 0.5),
+    ],
+
 ];
