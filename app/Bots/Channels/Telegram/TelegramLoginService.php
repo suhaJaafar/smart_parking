@@ -3,6 +3,7 @@
 namespace App\Bots\Channels\Telegram;
 
 use App\Enums\RoleTypes;
+use App\Models\TelegramAccount;
 use App\Models\User;
 use Illuminate\Support\Facades\Cache;
 
@@ -86,9 +87,14 @@ class TelegramLoginService
      */
     public function resolveOwner(string $chatId): ?User
     {
-        $user = User::with('roles')
-            ->where('telegram_chat_id', $chatId)
-            ->first();
+        // A device may be linked through the shared-devices table, so resolve
+        // there first and fall back to the legacy primary column.
+        $user = TelegramAccount::with('user.roles')
+            ->where('chat_id', $chatId)
+            ->first()?->user
+            ?? User::with('roles')
+                ->where('telegram_chat_id', $chatId)
+                ->first();
 
         if (!$user) {
             return null;

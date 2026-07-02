@@ -4,6 +4,7 @@ namespace App\Bots\Channels\Telegram;
 
 use App\Bots\Engine\ConversationEngine;
 use App\Enums\RoleTypes;
+use App\Models\TelegramAccount;
 use App\Models\User;
 
 /**
@@ -140,7 +141,13 @@ class TelegramInboundParser
         }
 
         if ($session->user_id === null) {
-            $user = User::where('telegram_chat_id', $chatId)->first();
+            // Resolve through the linked-devices table first (a chat that
+            // joined a shared account lives only here), then fall back to
+            // the legacy primary column on users.
+            $user = TelegramAccount::with('user.roles')
+                ->where('chat_id', $chatId)
+                ->first()?->user
+                ?? User::with('roles')->where('telegram_chat_id', $chatId)->first();
 
             if ($user) {
                 $hasBotRole = $user->roles->contains(
