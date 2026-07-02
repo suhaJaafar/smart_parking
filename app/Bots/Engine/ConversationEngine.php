@@ -7,6 +7,7 @@ use App\Bots\Contracts\BotSession;
 use App\Bots\Dto\OutboundReply;
 use App\Bots\Flows\CarEntryFlow;
 use App\Bots\Flows\CarExitFlow;
+use App\Bots\Flows\CoOwnerRequestFlow;
 use App\Bots\Flows\NearbyParksFlow;
 use App\Bots\Flows\OnboardingFlow;
 use App\Bots\Flows\ParkCreationFlow;
@@ -45,7 +46,6 @@ class ConversationEngine
         '0', 'cancel', 'الغاء', 'إلغاء',
         'menu', 'القائمة',
         'start', 'بدء', 'ابدأ', 'ابدا',
-        '9',
         'restart', 'اعادة', 'إعادة',
     ];
 
@@ -110,6 +110,7 @@ class ConversationEngine
         private readonly ParkCreationFlow $parkFlow,
         private readonly ParkPriceFlow $parkPriceFlow,
         private readonly PreBookingFlow $preBookingFlow,
+        private readonly CoOwnerRequestFlow $coOwnerRequestFlow,
         private readonly MenuRenderer $menu,
         private readonly ReservationService $reservations,
     ) {}
@@ -170,7 +171,7 @@ class ConversationEngine
         // to bail out and begin fresh.
         // -------------------------------------------------------------
         $isFreshStart = in_array($lower, ['start', 'menu', 'القائمة', 'hello', 'hi', 'مرحبا', 'هلو'], true);
-        $isCancel     = in_array($lower, ['0', 'cancel', 'الغاء', 'إلغاء', '9'], true);
+        $isCancel     = in_array($lower, ['0', 'cancel', 'الغاء', 'إلغاء'], true);
 
         if (!$session->getUser() && ($isFreshStart || $isCancel)) {
             $session->reset();
@@ -267,6 +268,7 @@ class ConversationEngine
             PreBookingFlow::FLOW   => $this->preBookingFlow->handle($session, $msg),
             ParkCreationFlow::FLOW => $this->parkFlow->handle($session, $msg),
             ParkPriceFlow::FLOW    => $this->parkPriceFlow->handle($session, $msg),
+            CoOwnerRequestFlow::FLOW => $this->coOwnerRequestFlow->handle($session, $msg),
             default                => null,
         };
 

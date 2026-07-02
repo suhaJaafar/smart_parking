@@ -1,0 +1,70 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
+
+/**
+ * A single ParkIQ account (one `users` row) can now be operated from more
+ * than one Telegram device. Each linked Telegram chat is a row here.
+ *
+ * The legacy `users.telegram_chat_id` column stays as the *primary* device
+ * pointer; this table is the source of truth for every chat_id that maps to
+ * a user. Existing primary chat_ids are backfilled so no current owner loses
+ * access. Lookups (session resolution, dashboard login) resolve through this
+ * table first, then fall back to the legacy column for safety.
+ */
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('telegram_accounts', function (Blueprint $table) {
+            $table->uuid('id')->primary();
+            $table->foreignUuid('user_id')
+                ->constrained('users')
+                ->cascadeOnDelete();
+            // The Telegram chat this device talks to. Unique: one chat can
+            // only ever belong to a single account.
+            $table->string('chat_id')->unique();
+            // The first device that created the account. Kept for display /
+            // "you cannot unlink the primary device" style guards later.
+            $table->boolean('is_primary')->default(false);
+            // Optional human label ("phone of Ali", "front-desk tablet").
+            $table->string('label')->nullable();
+            $table->timestamps();
+
+            $table->index('user_id');
+        });
+
+        // Backfill: every user that already has a primary Telegram chat_id
+        // gets a matching primary row so existing links keep working.
+        DB::table('users')
+            ->whereNotNull('telegram_chat_id')
+            ->orderBy('id')
+            ->chunkById(500, function ($users) {
+                $now  = now();
+                $rows = [];
+                foreach ($users as $user) {
+                    $rows[] = [
+                        'id'         => (string) Str::orderedUuid(),
+                        'user_id'    => $user->id,
+                        'chat_id'    => $user->telegram_chat_id,
+                        'is_primary' => true,
+                        'label'      => null,
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ];
+                }
+                if ($rows !== []) {
+                    DB::table('telegram_accounts')->insert($rows);
+                }
+            });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('telegram_accounts');
+    }
+};

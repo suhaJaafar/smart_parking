@@ -119,4 +119,34 @@ class User extends Authenticatable implements JWTSubject
     {
         return $this->hasMany(Payment::class);
     }
+
+    /**
+     * Telegram devices (chats) linked to this account. More than one lets
+     * two people operate the same account from two different phones.
+     */
+    public function telegramAccounts(): HasMany
+    {
+        return $this->hasMany(TelegramAccount::class);
+    }
+
+    /**
+     * Every Telegram chat_id that can reach this account — the linked
+     * devices plus the legacy primary column — de-duplicated. Used to
+     * fan a notification out to all of the account's phones.
+     *
+     * @return array<int, string>
+     */
+    public function telegramChatIds(): array
+    {
+        $ids = $this->telegramAccounts()->pluck('chat_id')->all();
+
+        if (!empty($this->telegram_chat_id)) {
+            $ids[] = (string) $this->telegram_chat_id;
+        }
+
+        return array_values(array_unique(array_filter(
+            array_map('strval', $ids),
+            static fn (string $id): bool => $id !== '',
+        )));
+    }
 }

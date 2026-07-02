@@ -54,6 +54,11 @@ Route::middleware('auth:api')->group(function () {
     // Space-owner routes — scoped to the authenticated user's own parks.
     Route::middleware('role:SPACE_OWNER,SUPER_ADMIN')->group(function () {
         Route::get('owner/stats', [App\Http\Controllers\OwnerController::class, 'stats']);
+
+        // Co-owner requests — people asking to co-manage the owner's garages.
+        Route::get('owner/co-owner-requests', [App\Http\Controllers\CoOwnerRequestController::class, 'index']);
+        Route::post('owner/co-owner-requests/{id}/approve', [App\Http\Controllers\CoOwnerRequestController::class, 'approve']);
+        Route::post('owner/co-owner-requests/{id}/reject', [App\Http\Controllers\CoOwnerRequestController::class, 'reject']);
     });
 
     // Customer-only routes

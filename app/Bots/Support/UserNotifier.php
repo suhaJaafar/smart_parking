@@ -38,8 +38,10 @@ class UserNotifier implements BotNotifier
             $this->whatsapp->sendTo((string) $user->phone_number, $reply);
         }
 
-        if (!empty($user->telegram_chat_id)) {
-            $this->telegram->sendTo((string) $user->telegram_chat_id, $reply);
+        // Fan out to every Telegram device linked to the account so both
+        // phones sharing an owner account receive the notification.
+        foreach ($user->telegramChatIds() as $chatId) {
+            $this->telegram->sendTo($chatId, $reply);
         }
     }
 }

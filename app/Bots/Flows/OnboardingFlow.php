@@ -34,6 +34,7 @@ class OnboardingFlow
 
     public function __construct(
         private readonly MenuRenderer $menu,
+        private readonly CoOwnerRequestFlow $coOwnerRequest,
     ) {}
 
     public function handle(BotSession $session, string $message): OutboundReply
@@ -73,7 +74,8 @@ class OnboardingFlow
             . "أرسل موقعك الحالي لأستكشاف الكراجات القريبة منك\n"
             . "او أرسل رقماً:\n\n"
             . "1️⃣  أبحث عن موقف لسيارتي 🚗\n"
-            . "2️⃣  أملك موقفاً وأريد تسجيله 📍\n\n"
+            . "2️⃣  أملك موقفاً وأريد تسجيله 📍\n"
+            . "3️⃣  تسجيل دخول لكراج آخر؟ 🔑\n\n"
             . "_يمكنك تغيير دورك (صاحب كراج/زبون) لاحقاً بإرسال 8️⃣ في أي وقت._"
         );
     }
@@ -83,8 +85,15 @@ class OnboardingFlow
         // Accept "١"/"٢" (Arabic) and "۱"/"۲" (Persian) too.
         $msg = trim(DigitNormalizer::toAscii($message));
 
+        // Option 3 — ask to co-manage an existing garage. Hands off to a
+        // dedicated flow that collects the requester's details and target
+        // garage, then waits for the owner's approval from the dashboard.
+        if ($msg === '3') {
+            return $this->coOwnerRequest->begin($session);
+        }
+
         if ($msg !== '1' && $msg !== '2') {
-            return OutboundReply::text("⚠️ الرجاء إرسال 1 أو 2.");
+            return OutboundReply::text("⚠️ الرجاء إرسال 1 أو 2 أو 3.");
         }
 
         // Already registered — just toggle the role and bounce back to the menu.
@@ -241,6 +250,15 @@ class OnboardingFlow
         }
 
         $user = User::create($attrs);
+
+        if ($session->getChannel() === 'telegram') {
+            // Record the creating chat as the primary linked device so a
+            // second phone can later be attached to the same account.
+            $user->telegramAccounts()->create([
+                'chat_id'    => $recipient,
+                'is_primary' => true,
+            ]);
+        }
 
         $roleRow = Role::firstOrCreate(['role' => $role->value]);
         $user->roles()->sync([$roleRow->id]);
