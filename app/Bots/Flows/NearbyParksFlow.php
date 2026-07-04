@@ -39,6 +39,15 @@ class NearbyParksFlow
     /** Prefix used to tag a tapped park button so it round-trips as inbound text. */
     private const PARK_OPTION_PREFIX = 'park:';
 
+    /** Callback id: confirm the reservation for the previewed park. */
+    private const CONFIRM_RESERVE_ID = 'reserve_confirm';
+
+    /** Callback id: discard the previewed park and re-open the list. */
+    private const CHANGE_PARK_ID = 'reserve_change';
+
+    /** Callback id: cancel the whole reservation from the confirmation gate. */
+    private const CANCEL_RESERVE_ID = 'reserve_cancel';
+
     public function __construct(
         private readonly ParkRepositoryInterface $parks,
         private readonly ReservationService $reservations,
@@ -64,6 +73,7 @@ class NearbyParksFlow
             'ask_location' => $this->showResults($session, $message),
             'ask_phone'    => $this->onPhoneStep($session, $message),
             'choose_park'  => $this->reserve($session, $message),
+            'confirm_park' => $this->confirmChoice($session, $message),
             default        => OutboundReply::empty(),
         };
     }
@@ -161,7 +171,7 @@ class NearbyParksFlow
 
         $session->update([
             'step'       => 'choose_park',
-            'data'       => ['parks' => $catalog],
+            'data'       => ['parks' => $catalog, 'origin' => ['lat' => $lat, 'lng' => $lng]],
             'expires_at' => now()->addMinutes(self::TTL_MINUTES),
         ]);
 
@@ -215,8 +225,93 @@ class NearbyParksFlow
             return OutboundReply::text("❌ لم يعد هذا الموقف متاحاً.");
         }
 
-        // Now that a park is chosen, collect the customer's phone (once) so
-        // the owner can reach them. Skipped if already known (e.g. WhatsApp).
+        // Don't commit yet — preview the pick and wait for an explicit
+        // confirmation. A wrong tap never debits a slot or notifies the owner;
+        // the hold is placed only once the customer taps "تأكيد".
+        return $this->askConfirmation($session, $choice, $park);
+    }
+
+    /**
+     * Confirmation gate: preview the chosen park and let the customer either
+     * confirm the reservation or go back to the list. Nothing is reserved
+     * until they confirm, so a mistaken pick is free to undo.
+     *
+     * @param array{id:string,name:string,lat:float,lng:float,free_spaces?:int} $choice
+     */
+    private function askConfirmation(BotSession $session, array $choice, Park $park): OutboundReply
+    {
+        $session->update([
+            'step'       => 'confirm_park',
+            'data'       => array_merge($session->getData(), ['pending' => $choice]),
+            'expires_at' => now()->addMinutes(self::TTL_MINUTES),
+        ]);
+
+        $price = number_format((float) $park->price, 0) . ' ' . config('services.qicard.currency');
+
+        $body = "📍 لقد اخترت: *{$choice['name']}*\n"
+              . "💰 سعر الحجز: *{$price}* (يُخصم مرة واحدة)\n"
+              . "🅿️ الأماكن المتاحة: *{$park->free_spaces}*\n\n"
+              . "هل تؤكّد الحجز في هذا الموقف؟";
+
+        return OutboundReply::buttons(
+            body:    $body,
+            options: [
+                ['id' => self::CONFIRM_RESERVE_ID, 'title' => '✅ تأكيد الحجز', 'description' => 'إتمام الحجز في هذا الموقف'],
+                ['id' => self::CHANGE_PARK_ID,     'title' => '🔄 اختيار موقف آخر', 'description' => 'العودة إلى قائمة المواقف'],
+                ['id' => self::CANCEL_RESERVE_ID,  'title' => '❌ إلغاء', 'description' => 'إلغاء العملية'],
+            ],
+            listButton: 'الخيارات',
+        );
+    }
+
+    /**
+     * Handle the confirmation gate: place the hold on "تأكيد", re-open the
+     * list on "اختيار موقف آخر", or refresh results if a new location
+     * is shared. No hold exists yet, so "choose another" is a pure no-op undo.
+     */
+    private function confirmChoice(BotSession $session, string $message): OutboundReply
+    {
+        $raw   = trim($message);
+        $lower = mb_strtolower($raw);
+
+        // Explicit cancel from the gate button — acknowledge and stop.
+        if ($lower === self::CANCEL_RESERVE_ID) {
+            $session->reset();
+            return OutboundReply::text("تم الالغاء");
+        }
+
+        // Sharing a fresh location refines the search.
+        [$lat, $lng] = $this->parseCoords($raw);
+        if ($lat !== null && $lng !== null) {
+            return $this->showParks($session, $lat, $lng);
+        }
+
+        // "Choose another" → back to the freshly re-queried list.
+        if ($lower === self::CHANGE_PARK_ID
+            || in_array($lower, ['تغيير', 'اختيار موقف آخر', 'موقف آخر', 'change'], true)
+        ) {
+            return $this->reopenList($session);
+        }
+
+        $choice = $session->getData()['pending'] ?? null;
+        if (!is_array($choice)) {
+            return $this->reopenList($session);
+        }
+
+        $park = Park::find($choice['id']);
+        if (!$park) {
+            $session->reset();
+            return OutboundReply::text("❌ لم يعد هذا الموقف متاحاً.");
+        }
+
+        // Anything other than an explicit confirmation re-shows the gate.
+        if ($lower !== self::CONFIRM_RESERVE_ID
+            && !in_array($lower, ['تأكيد', 'تاكيد', 'تم', 'confirm', 'نعم'], true)
+        ) {
+            return $this->askConfirmation($session, $choice, $park);
+        }
+
+        // Confirmed — collect the phone (once) then place the hold.
         if ($this->needsPhone($session->getUser())) {
             return $this->startPhoneGate(
                 $session,
@@ -227,6 +322,30 @@ class NearbyParksFlow
         }
 
         return $this->completeReservation($session, $park, $choice);
+    }
+
+    /**
+     * Re-open the nearby list when the customer decides to pick a different
+     * park. Reuses the origin location captured when the list was first shown
+     * (so availability is refreshed); falls back to asking for the location
+     * again if it is missing.
+     */
+    private function reopenList(BotSession $session): OutboundReply
+    {
+        $origin = $session->getData()['origin'] ?? null;
+        if (is_array($origin) && isset($origin['lat'], $origin['lng'])) {
+            return $this->showParks($session, (float) $origin['lat'], (float) $origin['lng']);
+        }
+
+        $session->update([
+            'step'       => 'ask_location',
+            'data'       => [],
+            'expires_at' => now()->addMinutes(self::TTL_MINUTES),
+        ]);
+
+        return OutboundReply::text(
+            Prompt::ask("📍 شارك موقعك من جديد لعرض المواقف القريبة.")
+        );
     }
 
     /**

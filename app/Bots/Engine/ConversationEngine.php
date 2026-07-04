@@ -13,6 +13,7 @@ use App\Bots\Flows\OnboardingFlow;
 use App\Bots\Flows\ParkCreationFlow;
 use App\Bots\Flows\ParkPriceFlow;
 use App\Bots\Flows\PreBookingFlow;
+use App\Bots\Support\BotRequestGuard;
 use App\Bots\Support\DigitNormalizer;
 use App\Bots\Support\MenuRenderer;
 use App\Enums\RoleTypes;
@@ -40,6 +41,14 @@ class ConversationEngine
     /** Inbound message types the engine understands. */
     public const TYPE_TEXT     = 'text';
     public const TYPE_LOCATION = 'location';
+
+    /**
+     * Marks an inbound text as a genuine "share my own contact" payload
+     * (verified by the channel parser as the sender's own Telegram contact).
+     * Only a value carrying this prefix is accepted as a phone number by the
+     * reservation flows — typed digits are never trusted.
+     */
+    public const CONTACT_PAYLOAD_PREFIX = 'bot-contact::';
 
     /** Cancel / restart — anything that should drop the user back to the menu. */
     private const ESCAPE_COMMANDS = [
@@ -113,15 +122,41 @@ class ConversationEngine
         private readonly CoOwnerRequestFlow $coOwnerRequestFlow,
         private readonly MenuRenderer $menu,
         private readonly ReservationService $reservations,
+        private readonly BotRequestGuard $requestGuard,
     ) {}
 
     /**
      * Resolve a single inbound message into an outbound reply.
      *
+     * Guards against overlapping deliveries: a message that arrives while an
+     * earlier one from the same conversation is still being processed is
+     * refused with a polite "please wait" instead of racing on the shared
+     * session state. All channels funnel through here, so the protection is
+     * defined once and applies everywhere.
+     *
      * `$type` MUST be one of the TYPE_* constants. `$text` is the already-
      * normalised payload (for `TYPE_LOCATION` this is "lat,lng").
      */
     public function handle(BotSession $session, string $text, string $type): OutboundReply
+    {
+        $lock = $this->requestGuard->acquire($session);
+
+        if ($lock === null) {
+            return OutboundReply::text('⏳ الرجاء الانتظار حتى انتهاء الطلب الحالي.');
+        }
+
+        try {
+            return $this->process($session, $text, $type);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
+     * The actual message-handling pipeline, run under the per-conversation
+     * lock acquired in {@see self::handle()}.
+     */
+    private function process(BotSession $session, string $text, string $type): OutboundReply
     {
         $msg = trim($text);
 
