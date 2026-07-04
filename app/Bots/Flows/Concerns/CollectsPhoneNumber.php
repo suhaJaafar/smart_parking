@@ -4,7 +4,7 @@ namespace App\Bots\Flows\Concerns;
 
 use App\Bots\Contracts\BotSession;
 use App\Bots\Dto\OutboundReply;
-use App\Bots\Support\DigitNormalizer;
+use App\Bots\Engine\ConversationEngine;
 use App\Models\User;
 
 /**
@@ -29,6 +29,9 @@ trait CollectsPhoneNumber
 
     /** Shortest plausible phone length (digits only) we will accept. */
     private const PHONE_MIN_DIGITS = 7;
+
+    /** Longest plausible phone length (E.164 caps national numbers at 15). */
+    private const PHONE_MAX_DIGITS = 15;
 
     /**
      * Does this customer still need to share a phone number?
@@ -86,11 +89,20 @@ trait CollectsPhoneNumber
     /**
      * Handle one inbound message while in the phone step.
      *
+     * The phone number is *mandatory* and can only be supplied by the
+     * customer sharing their OWN contact through the native share-contact
+     * button (the channel parser tags such a payload with
+     * {@see ConversationEngine::CONTACT_PAYLOAD_PREFIX}). Typed digits, a
+     * friend's contact, an explicit "لا", or any unrelated message all
+     * cancel the reservation — no reservation is ever made without a real,
+     * self-shared number. No hold has been placed at this stage, so
+     * cancelling simply resets the session.
+     *
      * Returns either:
-     *   - an {@see OutboundReply} → still collecting (re-prompt / request contact)
+     *   - an {@see OutboundReply} → still collecting (share prompt) OR the
+     *     reservation was cancelled (session already reset)
      *   - array<string, mixed> → number captured & stored; the value is the
-     *     resume payload the caller passed to {@see self::startPhoneGate()},
-     *     so it can continue where it left off.
+     *     resume payload the caller passed to {@see self::startPhoneGate()}.
      *
      * @return OutboundReply|array<string, mixed>
      */
@@ -106,29 +118,42 @@ trait CollectsPhoneNumber
             );
         }
 
-        // Customer declined — the number is required, so we re-ask.
-        if ($raw === self::PHONE_NO) {
-            return $this->phonePermissionPrompt()->withAppendedBody(
-                "\n\n_رقم الهاتف مطلوب لإتمام الحجز._"
-            );
-        }
+        // A genuine self-shared contact is the ONLY accepted input. Validate
+        // its length so a malformed value can never be stored as a phone.
+        if (str_starts_with($raw, ConversationEngine::CONTACT_PAYLOAD_PREFIX)) {
+            $digits = substr($raw, strlen(ConversationEngine::CONTACT_PAYLOAD_PREFIX));
 
-        // Otherwise: did a phone number arrive (shared contact or typed)?
-        $digits = preg_replace('/\D/', '', DigitNormalizer::toAscii($raw));
+            if ($this->isPlausiblePhone($digits)) {
+                $session->getUser()?->forceFill(['phone_number' => $digits])->save();
 
-        if (is_string($digits) && strlen($digits) >= self::PHONE_MIN_DIGITS) {
-            $session->getUser()?->forceFill(['phone_number' => $digits])->save();
+                $resume = $session->getData()['phone_resume'] ?? null;
+                if (!is_array($resume)) {
+                    $session->reset();
+                    return OutboundReply::text("⚠️ انتهت الجلسة. ابدأ العملية من جديد.");
+                }
 
-            $resume = $session->getData()['phone_resume'] ?? null;
-            if (!is_array($resume)) {
-                $session->reset();
-                return OutboundReply::text("⚠️ انتهت الجلسة. ابدأ العملية من جديد.");
+                return $resume;
             }
-
-            return $resume;
         }
 
-        // Unrecognised input while waiting for the number — re-prompt.
-        return $this->phonePermissionPrompt();
+        // Anything else — tapping "لا", typing a number, sharing someone
+        // else's contact, or ignoring the buttons — cancels the reservation.
+        // A phone number is required and must be self-shared via the button.
+        $session->reset();
+        return OutboundReply::text(
+            "❌ تم إلغاء الحجز.\n"
+            . "لإتمام الحجز يجب الضغط على *نعم* ثم مشاركة رقمك عبر الزر."
+        );
+    }
+
+    /**
+     * A defensive sanity check on a digits-only phone: long enough to be a
+     * real number, but not absurdly long (guards against malformed values).
+     */
+    private function isPlausiblePhone(string $digits): bool
+    {
+        return ctype_digit($digits)
+            && strlen($digits) >= self::PHONE_MIN_DIGITS
+            && strlen($digits) <= self::PHONE_MAX_DIGITS;
     }
 }

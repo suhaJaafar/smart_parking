@@ -75,13 +75,25 @@ class TelegramInboundParser
             }
         }
 
-        // Contact share — treated as raw text (engine handles phone-number
-        // extraction inside the relevant flows).
+        // Contact share — accepted ONLY when the user shares their OWN
+        // contact via the native "share contact" button (Telegram sets
+        // contact.user_id === from.id in that case). A tagged payload is
+        // emitted so the reservation flows can trust it as a real phone
+        // number; a friend's attached contact is delivered untagged and is
+        // rejected downstream.
         if (isset($message['contact']['phone_number'])) {
+            $digits  = preg_replace('/\D/', '', (string) $message['contact']['phone_number']);
+            $ownerId = $message['from']['id'] ?? null;
+            $isOwn   = isset($message['contact']['user_id'])
+                && $ownerId !== null
+                && (string) $message['contact']['user_id'] === (string) $ownerId;
+
             return [
                 'chat_id' => (string) $chatId,
                 'type'    => ConversationEngine::TYPE_TEXT,
-                'text'    => preg_replace('/\D/', '', (string) $message['contact']['phone_number']),
+                'text'    => $isOwn
+                    ? ConversationEngine::CONTACT_PAYLOAD_PREFIX . $digits
+                    : $digits,
                 'name'    => $name,
             ];
         }

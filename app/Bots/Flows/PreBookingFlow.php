@@ -177,7 +177,7 @@ class PreBookingFlow
 
         $session->update([
             'step'       => 'choose_park',
-            'data'       => ['parks' => $catalog],
+            'data'       => ['parks' => $catalog, 'origin' => ['lat' => $lat, 'lng' => $lng]],
             'expires_at' => now()->addMinutes(self::TTL_MINUTES),
         ]);
 
@@ -227,7 +227,7 @@ class PreBookingFlow
 
         $session->update([
             'step'       => 'ask_time',
-            'data'       => ['park' => $choice],
+            'data'       => ['park' => $choice, 'origin' => $session->getData()['origin'] ?? null],
             'expires_at' => now()->addMinutes(self::TTL_MINUTES),
         ]);
 
@@ -246,7 +246,8 @@ class PreBookingFlow
             . "🕒 متى ستصل إلى الموقف؟\n"
             . "اكتب وقت وصولك في رسالة.\n"
             . "_أمثلة: ٣ العصر • ٣:٣٠ العصر • ٨ صباحاً غداً_\n\n"
-            . "⏳ مهلة الوصول ١٠ دقائق بعد الوقت المحدد، وبعدها يُلغى الحجز تلقائياً ويمكنك إعادته."
+            . "⏳ مهلة الوصول ١٠ دقائق بعد الوقت المحدد، وبعدها يُلغى الحجز تلقائياً ويمكنك إعادته.\n\n"
+            . "_أو أرسل *تغيير الموقف* لاختيار موقف آخر._"
         ));
     }
 
@@ -260,6 +261,11 @@ class PreBookingFlow
         if (!$choice) {
             $session->reset();
             return OutboundReply::text("❌ انتهت الجلسة. ابدأ من جديد.");
+        }
+
+        // Change the park before any hold is placed — nothing to undo.
+        if ($this->isChangeCommand($message)) {
+            return $this->reopenList($session);
         }
 
         $scheduledAt = $this->parseSchedule($message);
@@ -298,7 +304,11 @@ class PreBookingFlow
         // Move to the confirm/pay step, remembering which reserve to settle.
         $session->update([
             'step'       => 'confirm',
-            'data'       => ['reserve_id' => $reserve->id],
+            'data'       => [
+                'reserve_id' => $reserve->id,
+                'origin'     => $session->getData()['origin'] ?? null,
+                'park'       => $choice,
+            ],
             'expires_at' => now()->addMinutes(self::TTL_MINUTES),
         ]);
 
@@ -310,15 +320,60 @@ class PreBookingFlow
             . "🕒 موعد وصولك: *{$schedule}*\n"
             . "🗺️ للاتجاهات: [اضغط هنا]({$mapsUrl})\n\n"
             . "💳 لإتمام الحجز، ادفع الآن بإرسال *تم الحجز*\n"
-            . "_أو أرسل *0* للإلغاء._"
+            . "_أو أرسل *تغيير الموقف* لاختيار موقف آخر، أو *0* للإلغاء._"
+        );
+    }
+
+    /**
+     * Does this message ask to swap the chosen park for a different one?
+     */
+    private function isChangeCommand(string $message): bool
+    {
+        return in_array(mb_strtolower(trim($message)), [
+            'تغيير الموقف', 'تغيير', 'اختيار موقف آخر', 'موقف آخر', 'change',
+        ], true);
+    }
+
+    /**
+     * Return to the nearby list so the customer can pick a different park.
+     * Reuses the origin location captured when results were first shown (so
+     * availability is refreshed); falls back to re-asking for the location.
+     */
+    private function reopenList(BotSession $session): OutboundReply
+    {
+        $origin = $session->getData()['origin'] ?? null;
+        if (is_array($origin) && isset($origin['lat'], $origin['lng'])) {
+            return $this->showParks($session, (float) $origin['lat'], (float) $origin['lng']);
+        }
+
+        $session->update([
+            'step'       => 'ask_location',
+            'data'       => [],
+            'expires_at' => now()->addMinutes(self::TTL_MINUTES),
+        ]);
+
+        return OutboundReply::text(
+            Prompt::ask("📍 شارك موقع المكان من جديد لعرض المواقف القريبة.")
         );
     }
 
     private function confirmAndPay(BotSession $session, string $message): OutboundReply
     {
+        // Change the park at the last step: cancel the pending hold (which
+        // frees its slot) and re-open the list. Only a START hold is
+        // cancellable; a paid/expired one is left untouched.
+        if ($this->isChangeCommand($message)) {
+            $reserveId = $session->getData()['reserve_id'] ?? null;
+            $reserve   = $reserveId ? Reserve::find($reserveId) : null;
+            if ($reserve && $reserve->status === Reserve::STATUS_START) {
+                $this->reservations->cancel($reserve);
+            }
+            return $this->reopenList($session);
+        }
+
         if (!in_array(mb_strtolower(trim($message)), self::CONFIRM_WORDS, true)) {
             return OutboundReply::text(
-                Prompt::ask("✳️ أرسل *تم الحجز* لتأكيد الحجز والانتقال للدفع المسبق، أو *0* للإلغاء.")
+                Prompt::ask("✳️ أرسل *تم الحجز* لتأكيد الحجز والانتقال للدفع المسبق، أو *تغيير الموقف* لاختيار موقف آخر، أو *0* للإلغاء.")
             );
         }
 
