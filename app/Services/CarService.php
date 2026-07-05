@@ -61,9 +61,10 @@ class CarService
     /**
      * Park a car: link it to a park and decrement free_spaces, atomically.
      *
-     * If the customer already had an ACTIVE reservation for this park, the
-     * slot was debited at reservation time. Pass $alreadyFull = true to skip
-     * the second decrement (the reservation is fulfilled, not duplicated).
+     * The slot is claimed here, at physical entry — reservations no longer
+     * pre-debit a space, so this is the single point where free_spaces drops.
+     * $alreadyFull is kept only for the rare caller that has already accounted
+     * for the slot elsewhere; normal callers leave it false.
      *
      * Throws if the park is full or if the car is already inside another park.
      */

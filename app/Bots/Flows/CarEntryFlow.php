@@ -366,12 +366,13 @@ class CarEntryFlow
     private function completeEntry(BotSession $session, Park $park, User $carOwner, Car $car): OutboundReply
     {
         try {
-            // The reservation already debited the space at reservation time,
-            // so we must not decrement free_spaces again.
+            // Claim the physical slot now, at entry. Holds no longer pre-debit
+            // free_spaces, so the space is only taken when the car actually
+            // drives in.
             $car = $this->carService->enterPark(
                 $car,
                 $park->fresh(),
-                alreadyFull: true,
+                alreadyFull: false,
             );
 
             // Mark the reservation as ACTIVE.
@@ -379,7 +380,14 @@ class CarEntryFlow
         } catch (Throwable $e) {
             Log::error('Bot car enter failed', ['error' => $e->getMessage()]);
             $session->reset();
-            return OutboundReply::text("❌ تعذّر إدخال السيارة: {$e->getMessage()}");
+
+            $full = str_contains(strtolower($e->getMessage()), 'full');
+
+            return OutboundReply::text(
+                $full
+                    ? "❌ الموقف ممتلئ حالياً، تعذّر إدخال السيارة."
+                    : "❌ تعذّر إدخال السيارة، حاول مرة أخرى."
+            );
         }
 
         $session->reset();
