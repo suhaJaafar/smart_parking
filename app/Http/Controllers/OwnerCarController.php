@@ -6,10 +6,12 @@ use App\Data\CarPlate;
 use App\Http\Requests\StoreOwnerCarRequest;
 use App\Http\Requests\UpdateOwnerCarRequest;
 use App\Http\Resources\OwnerCarResource;
+use App\Http\Resources\OwnerHoldResource;
 use App\Models\Car;
 use App\Models\Park;
 use App\Models\User;
 use App\Services\CarService;
+use App\Services\ReservationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -34,30 +36,45 @@ class OwnerCarController extends Controller
 {
     public function __construct(
         private readonly CarService $cars,
+        private readonly ReservationService $reservations,
     ) {}
 
     /**
-     * List the cars currently inside the signed-in owner's garages.
+     * List the cars currently inside the signed-in owner's garages, together
+     * with the cars still *waiting to enter* — reservations placed from the
+     * bot that haven't physically driven in yet.
      *
-     * Optional `?park_id=` narrows to a single garage (must belong to the
-     * owner, otherwise it is ignored).
+     * The parked cars are the paginated `data`; the waiting holds ride along
+     * under `waiting`. Holds reserve a customer's intent but do NOT occupy a
+     * physical slot (free_spaces only drops on real entry), so one request
+     * gives the owner the full picture without a second round-trip.
+     *
+     * Optional `?park_id=` narrows both lists to a single garage (must belong
+     * to the owner, otherwise it is ignored).
      */
     public function index(Request $request): AnonymousResourceCollection
     {
         $owner    = $request->user();
         $parkIds  = $this->ownedParkIds($owner);
 
+        $parkId     = $request->query('park_id');
+        $onlyParkId = (is_string($parkId) && $parkIds->contains($parkId)) ? $parkId : null;
+
         $query = Car::query()
             ->whereIn('park_id', $parkIds)
             ->with(['park:id,name', 'user:id,name,phone_number'])
             ->latest();
 
-        $parkId = $request->query('park_id');
-        if (is_string($parkId) && $parkIds->contains($parkId)) {
-            $query->where('park_id', $parkId);
+        if ($onlyParkId !== null) {
+            $query->where('park_id', $onlyParkId);
         }
 
-        return OwnerCarResource::collection($query->paginate(20));
+        $waiting = $this->reservations->pendingForParkIds($parkIds, $onlyParkId);
+
+        return OwnerCarResource::collection($query->paginate(20))
+            ->additional([
+                'waiting' => OwnerHoldResource::collection($waiting),
+            ]);
     }
 
     /**

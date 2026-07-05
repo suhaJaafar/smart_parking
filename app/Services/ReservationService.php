@@ -75,11 +75,14 @@ class ReservationService
     /**
      * Atomically place a hold (status = START) on one space at $park for $user.
      *
-     * Decrements parks.free_spaces inside a row-locked transaction so two
-     * customers can't grab the last spot. The slot stays debited until the
-     * owner enters the car (→ ACTIVE → COMPLETED, slot returns on exit),
-     * the TTL elapses (→ EXPIRED, slot refunded), or the customer cancels
-     * (→ CANCELLED, slot refunded).
+     * A hold does NOT debit parks.free_spaces — the physical slot is claimed
+     * only when the owner actually enters the car (CarService::enterPark). To
+     * avoid over-promising, the hold is still rejected inside a row-locked
+     * transaction once (cars inside + outstanding holds) fills the park, so
+     * two customers can't be promised the same last spot. The hold is later
+     * released — with no slot to refund — when the owner enters the car
+     * (→ ACTIVE), the TTL elapses (→ EXPIRED), or the customer cancels
+     * (→ CANCELLED).
      *
      * When $scheduledAt is supplied (pre-booking for a future arrival) it is
      * recorded on the reservation and the hold window is anchored to that
@@ -95,15 +98,13 @@ class ReservationService
         ?\DateTimeInterface $scheduledAt = null,
     ): Reserve {
         return DB::transaction(function () use ($user, $park, $preBooking, $scheduledAt) {
-            // Lock the park row to serialize free_spaces decrement.
+            // Lock the park row to serialize the availability check below.
             $locked = Park::whereKey($park->id)->lockForUpdate()->firstOrFail();
 
-            if ($locked->free_spaces < 1) {
-                throw new RuntimeException('PARK_FULL');
-            }
-
             // Prevent stacking holds on the same park. An ACTIVE row means
-            // the customer's car is already inside — also a duplicate.
+            // the customer's car is already inside — also a duplicate. Checked
+            // first so a repeat tap idempotently returns the same hold instead
+            // of tripping the capacity gate below.
             $existing = Reserve::where('user_id', $user->id)
                 ->where('park_id', $locked->id)
                 ->whereIn('status', [Reserve::STATUS_START, Reserve::STATUS_ACTIVE])
@@ -114,7 +115,21 @@ class ReservationService
                 return $existing;
             }
 
-            $locked->decrement('free_spaces');
+            // A hold no longer debits free_spaces — the slot is claimed only
+            // when the car physically enters the park. We still guard against
+            // over-promising: free_spaces already reflects the cars currently
+            // inside, so the room left to promise is that minus the holds still
+            // outstanding. Once (inside + holds) reaches capacity, we're full.
+            $outstandingHolds = Reserve::where('park_id', $locked->id)
+                ->where('status', Reserve::STATUS_START)
+                ->count();
+
+            if ($locked->free_spaces - $outstandingHolds < 1) {
+                throw new RuntimeException('PARK_FULL');
+            }
+
+            // NOTE: free_spaces is intentionally NOT decremented here. It is
+            // debited only on physical entry (CarService::enterPark).
 
             // A scheduled pre-booking is only meaningful when pre-booking.
             $scheduled = $preBooking ? $scheduledAt : null;
@@ -249,12 +264,9 @@ class ReservationService
                 return $reserve;
             }
 
-            $park = Park::whereKey($reserve->park_id)->lockForUpdate()->firstOrFail();
-
-            if ($park->free_spaces < $park->capacity) {
-                $park->increment('free_spaces');
-            }
-
+            // A START hold never debited free_spaces (the slot is only taken
+            // when the car physically enters), so there is nothing to refund —
+            // just release the hold.
             $reserve->update(['status' => Reserve::STATUS_CANCELLED]);
             return $reserve->fresh();
         });
@@ -303,12 +315,8 @@ class ReservationService
                     return;
                 }
 
-                $park = Park::whereKey($reserve->park_id)->lockForUpdate()->first();
-
-                if ($park && $park->free_spaces < $park->capacity) {
-                    $park->increment('free_spaces');
-                }
-
+                // A START hold never debited free_spaces, so expiry only
+                // releases the hold — there is no slot to refund.
                 $reserve->update(['status' => Reserve::STATUS_EXPIRED]);
                 $count++;
             });
@@ -487,5 +495,40 @@ class ReservationService
         return Reserve::where('park_id', $park->id)
             ->where('status', Reserve::STATUS_START)
             ->count();
+    }
+
+    /**
+     * Pending holds (START) across a set of parks — the cars that have
+     * reserved a slot but haven't physically entered yet, newest first.
+     *
+     * Embedded in the owner dashboard's cars response as the "waiting to
+     * enter" list. Each row carries its customer (with phone) and that
+     * customer's cars (newest first) so the plate can be shown, plus the park,
+     * all eager-loaded. Capped at $limit — an owner's outstanding holds are
+     * naturally bounded by their parks' capacity, so no pagination is needed.
+     *
+     * @param  \Illuminate\Support\Collection<int, string>|array<int, string>  $parkIds
+     * @return Collection<int, Reserve>
+     */
+    public function pendingForParkIds(
+        \Illuminate\Support\Collection|array $parkIds,
+        ?string $onlyParkId = null,
+        int $limit = 100,
+    ): Collection {
+        $query = Reserve::query()
+            ->whereIn('park_id', $parkIds)
+            ->where('status', Reserve::STATUS_START)
+            ->with([
+                'park:id,name',
+                'user:id,name,phone_number',
+                'user.cars' => fn ($q) => $q->latest(),
+            ])
+            ->latest('created_at');
+
+        if ($onlyParkId !== null) {
+            $query->where('park_id', $onlyParkId);
+        }
+
+        return $query->take($limit)->get();
     }
 }
