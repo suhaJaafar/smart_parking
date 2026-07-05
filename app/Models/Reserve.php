@@ -2,7 +2,9 @@
 
 namespace App\Models;
 
+use App\Enums\PaymentStatusTypes;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -53,6 +55,31 @@ class Reserve extends Model
     public function payments(): HasMany
     {
         return $this->hasMany(Payment::class, 'reserve_id');
+    }
+
+    /**
+     * Live pending holds: START reservations that still hold their spot —
+     * i.e. not yet past their TTL, or already paid (a paid pre-booking never
+     * expires). Mirrors {@see \App\Services\ReservationService::expireStale()}
+     * so the "waiting to enter" list and the overbooking gate agree with the
+     * every-minute sweep even when it is momentarily behind: an unpaid hold
+     * past its `expires_at` is treated as gone the moment it lapses, not only
+     * once the sweep flips it to EXPIRED.
+     *
+     * @param  Builder<Reserve>  $query
+     * @return Builder<Reserve>
+     */
+    public function scopeLivePending(Builder $query): Builder
+    {
+        return $query
+            ->where('status', self::STATUS_START)
+            ->where(function (Builder $q) {
+                $q->whereNull('expires_at')
+                    ->orWhere('expires_at', '>', now())
+                    ->orWhereHas('payments', function (Builder $p) {
+                        $p->where('status', PaymentStatusTypes::SUCCESS->value);
+                    });
+            });
     }
 
     /**
