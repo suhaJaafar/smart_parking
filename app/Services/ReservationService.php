@@ -121,7 +121,7 @@ class ReservationService
             // inside, so the room left to promise is that minus the holds still
             // outstanding. Once (inside + holds) reaches capacity, we're full.
             $outstandingHolds = Reserve::where('park_id', $locked->id)
-                ->where('status', Reserve::STATUS_START)
+                ->livePending()
                 ->count();
 
             if ($locked->free_spaces - $outstandingHolds < 1) {
@@ -478,7 +478,7 @@ class ReservationService
     public function pendingForPark(Park $park, int $limit = 10): Collection
     {
         return Reserve::where('park_id', $park->id)
-            ->where('status', Reserve::STATUS_START)
+            ->livePending()
             ->with(['user.cars' => fn ($query) => $query->latest()])
             ->latest('created_at')
             ->take($limit)
@@ -493,7 +493,7 @@ class ReservationService
     public function pendingCountForPark(Park $park): int
     {
         return Reserve::where('park_id', $park->id)
-            ->where('status', Reserve::STATUS_START)
+            ->livePending()
             ->count();
     }
 
@@ -517,7 +517,7 @@ class ReservationService
     ): Collection {
         $query = Reserve::query()
             ->whereIn('park_id', $parkIds)
-            ->where('status', Reserve::STATUS_START)
+            ->livePending()
             ->with([
                 'park:id,name',
                 'user:id,name,phone_number',
