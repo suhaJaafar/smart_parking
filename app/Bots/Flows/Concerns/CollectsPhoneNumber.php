@@ -35,10 +35,34 @@ trait CollectsPhoneNumber
 
     /**
      * Does this customer still need to share a phone number?
+     *
+     * True when there is no number yet, or when the stored value is not a
+     * usable phone (e.g. a malformed record left by an older bug). This makes
+     * the gate self-healing: a bad stored number is re-collected instead of
+     * being silently reused, so the owner never sees garbage again.
      */
     protected function needsPhone(?User $user): bool
     {
-        return $user !== null && blank($user->phone_number);
+        return $user !== null && !$this->isStoredPhoneUsable($user->phone_number);
+    }
+
+    /**
+     * Whether a value already on the user record is a plausible phone.
+     *
+     * Lenient about formatting (a leading "+", spaces or dashes are ignored)
+     * so legitimately stored international numbers still pass, but rejects
+     * blanks and absurdly long values.
+     */
+    private function isStoredPhoneUsable(?string $phone): bool
+    {
+        if (blank($phone)) {
+            return false;
+        }
+
+        $digits = preg_replace('/\D/', '', $phone);
+
+        return strlen($digits) >= self::PHONE_MIN_DIGITS
+            && strlen($digits) <= self::PHONE_MAX_DIGITS;
     }
 
     /**

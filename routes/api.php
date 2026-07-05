@@ -2,8 +2,15 @@
 
 use App\Bots\Channels\Telegram\TelegramController;
 use App\Bots\Channels\WhatsApp\WhatsAppController;
+use App\Http\Controllers\AdminController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\CoOwnerRequestController;
+use App\Http\Controllers\CustomerController;
+use App\Http\Controllers\OwnerCarController;
+use App\Http\Controllers\OwnerController;
+use App\Http\Controllers\ParkController;
 use App\Http\Controllers\PaymentController;
+use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
 
 
@@ -24,46 +31,53 @@ Route::middleware('auth:api')->group(function () {
       // users routes — privileged user management, SUPER_ADMIN only.
     Route::prefix('users')->group(function () {
         Route::middleware('role:SUPER_ADMIN')->group(function () {
-            Route::get('/', [App\Http\Controllers\UserController::class, 'index']);
-            Route::post('/', [App\Http\Controllers\UserController::class, 'store']);
-            Route::get('{id}', [App\Http\Controllers\UserController::class, 'show']);
-            Route::put('{id}', [App\Http\Controllers\UserController::class, 'update']);
-            Route::delete('{id}', [App\Http\Controllers\UserController::class, 'destroy']);
+            Route::get('/', [UserController::class, 'index']);
+            Route::post('/', [UserController::class, 'store']);
+            Route::get('{id}', [UserController::class, 'show']);
+            Route::put('{id}', [UserController::class, 'update']);
+            Route::delete('{id}', [UserController::class, 'destroy']);
         });
     });
 
     // parking routes
     Route::prefix('parks')->group(function () {
         // Collection routes
-        Route::get('/', [App\Http\Controllers\ParkController::class, 'index']);
-        Route::post('/', [App\Http\Controllers\ParkController::class, 'store']);
-        Route::get('user', [App\Http\Controllers\ParkController::class, 'userParks']);
-        Route::get('{id}', [App\Http\Controllers\ParkController::class, 'show']);
-        Route::put('{id}', [App\Http\Controllers\ParkController::class, 'update']);
-        Route::delete('{id}', [App\Http\Controllers\ParkController::class, 'destroy']);
-        Route::post('{id}/entercar', [App\Http\Controllers\ParkController::class, 'enterCar']);
-        Route::post('{id}/exitcar', [App\Http\Controllers\ParkController::class, 'exitCar']);
+        Route::get('/', [ParkController::class, 'index']);
+        Route::post('/', [ParkController::class, 'store']);
+        Route::get('user', [ParkController::class, 'userParks']);
+        Route::get('{id}', [ParkController::class, 'show']);
+        Route::put('{id}', [ParkController::class, 'update']);
+        Route::delete('{id}', [ParkController::class, 'destroy']);
+        Route::post('{id}/entercar', [ParkController::class, 'enterCar']);
+        Route::post('{id}/exitcar', [ParkController::class, 'exitCar']);
     });
 
 
     // Admin-only routes
     Route::middleware('role:ADMIN,SUPER_ADMIN')->group(function () {
-        Route::get('admin/stats', [App\Http\Controllers\AdminController::class, 'stats']);
+        Route::get('admin/stats', [AdminController::class, 'stats']);
     });
 
     // Space-owner routes — scoped to the authenticated user's own parks.
     Route::middleware('role:SPACE_OWNER,SUPER_ADMIN')->group(function () {
-        Route::get('owner/stats', [App\Http\Controllers\OwnerController::class, 'stats']);
+        Route::get('owner/stats', [OwnerController::class, 'stats']);
 
         // Co-owner requests — people asking to co-manage the owner's garages.
-        Route::get('owner/co-owner-requests', [App\Http\Controllers\CoOwnerRequestController::class, 'index']);
-        Route::post('owner/co-owner-requests/{id}/approve', [App\Http\Controllers\CoOwnerRequestController::class, 'approve']);
-        Route::post('owner/co-owner-requests/{id}/reject', [App\Http\Controllers\CoOwnerRequestController::class, 'reject']);
+        Route::get('owner/co-owner-requests', [CoOwnerRequestController::class, 'index']);
+        Route::post('owner/co-owner-requests/{id}/approve', [CoOwnerRequestController::class, 'approve']);
+        Route::post('owner/co-owner-requests/{id}/reject', [CoOwnerRequestController::class, 'reject']);
+
+        // Cars inside the owner's garages — full CRUD, scoped to owned parks.
+        Route::get('owner/cars', [OwnerCarController::class, 'index']);
+        Route::post('owner/cars', [OwnerCarController::class, 'store']);
+        Route::get('owner/cars/{id}', [OwnerCarController::class, 'show']);
+        Route::put('owner/cars/{id}', [OwnerCarController::class, 'update']);
+        Route::delete('owner/cars/{id}', [OwnerCarController::class, 'destroy']);
     });
 
     // Customer-only routes
     Route::middleware('role:USER')->group(function () {
-        Route::get('customer/parks/nearby', [App\Http\Controllers\CustomerController::class, 'nearbyParks']);
+        Route::get('customer/parks/nearby', [CustomerController::class, 'nearbyParks']);
     });
 });
 
