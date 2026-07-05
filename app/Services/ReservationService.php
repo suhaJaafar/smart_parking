@@ -54,6 +54,19 @@ class ReservationService
      */
     public const ACTIVE_UNPAID_TIMEOUT_HOURS = 24;
 
+    /**
+     * Grace window after a stay's payment settles before the sweep
+     * ({@see self::closePaidStaleActive()}) auto-completes it: the car is
+     * exited (releasing the slot) and the reservation → COMPLETED.
+     *
+     * An ACTIVE stay is only reached once the car has physically entered, so
+     * a settled payment means the customer paid while parked — they are on
+     * their way out. This short grace lets the owner tap "exit" themselves;
+     * if they forget, the slot is released shortly after so it isn't held
+     * open indefinitely.
+     */
+    public const PAID_STAY_EXIT_GRACE_MINUTES = 15;
+
     public function __construct(
         private readonly PaymentService $payments,
         private readonly CarService $cars,
