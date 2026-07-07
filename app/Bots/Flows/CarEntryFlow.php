@@ -232,11 +232,15 @@ class CarEntryFlow
             ? "🚗 {$car->plate_prefix}-{$car->car_number} — {$name}"
             : "👤 {$name} — بدون سيارة مسجّلة";
 
+        // Lead the description with the booking code so the owner can match
+        // the customer who just told them "رمز حجزي 4821".
+        $code = $reserve->booking_code ? "🔢 {$reserve->booking_code} • " : '';
+
         if ($car) {
-            $description = $reserve->is_pre_booking ? '💳 حجز مسبق' : 'جاهزة للإدخال';
+            $description = $code . ($reserve->is_pre_booking ? '💳 حجز مسبق' : 'جاهزة للإدخال');
         } else {
             $badge       = $reserve->is_pre_booking ? '💳 حجز مسبق • ' : '';
-            $description = $badge . 'أدخل اللوحة بعد الاختيار';
+            $description = $code . $badge . 'أدخل اللوحة بعد الاختيار';
         }
 
         return [

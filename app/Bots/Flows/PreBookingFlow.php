@@ -317,7 +317,8 @@ class PreBookingFlow
 
         return OutboundReply::text(
             "✅ تم حجز مكان لك مسبقاً في *{$choice['name']}*\n\n"
-            . "🕒 موعد وصولك: *{$schedule}*\n"
+            . "� رمز الحجز: *{$reserve->booking_code}*\n"
+            . "�🕒 موعد وصولك: *{$schedule}*\n"
             . "🗺️ للاتجاهات: [اضغط هنا]({$mapsUrl})\n\n"
             . "💳 لإتمام الحجز، ادفع الآن بإرسال *تم الحجز*\n"
             . "_أو أرسل *تغيير الموقف* لاختيار موقف آخر، أو *0* للإلغاء._"
@@ -440,6 +441,7 @@ class PreBookingFlow
             $message = "🔔 *حجز مسبق جديد في موقفك*\n\n"
                      . "الموقف: *{$park->name}*\n"
                      . "الزبون: *{$customerName}*\n"
+                     . "🔢 رمز الحجز: *{$reserve->booking_code}*\n"
                      . $contactLine
                      . "🕒 موعد الوصول: *{$schedule}*\n"
                      . "الأماكن المتبقية: *{$park->free_spaces}*\n\n"

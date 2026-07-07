@@ -4,6 +4,7 @@ namespace App\Bots\Flows;
 
 use App\Bots\Contracts\BotSession;
 use App\Bots\Dto\OutboundReply;
+use App\Bots\Engine\ConversationEngine;
 use App\Bots\Support\DigitNormalizer;
 use App\Bots\Support\MenuRenderer;
 use App\Enums\RoleTypes;
@@ -32,6 +33,17 @@ class OnboardingFlow
     public const FLOW = 'onboarding';
     private const TTL_MINUTES = 10;
 
+    /** Session step used while collecting a space owner's phone number. */
+    private const PHONE_STEP = 'ask_phone';
+
+    /** Callback ids for the share-permission prompt. */
+    private const PHONE_YES = 'phone:yes';
+    private const PHONE_NO  = 'phone:no';
+
+    /** Shortest / longest plausible phone length (digits only). */
+    private const PHONE_MIN_DIGITS = 7;
+    private const PHONE_MAX_DIGITS = 15;
+
     public function __construct(
         private readonly MenuRenderer $menu,
         private readonly CoOwnerRequestFlow $coOwnerRequest,
@@ -53,9 +65,10 @@ class OnboardingFlow
         }
 
         return match ($session->getStep()) {
-            'ask_role' => $this->handleRole($session, $message),
-            'ask_name' => $this->handleName($session, $message),
-            default    => OutboundReply::empty(),
+            'ask_role'       => $this->handleRole($session, $message),
+            self::PHONE_STEP => $this->handleOwnerPhone($session, $message),
+            'ask_name'       => $this->handleName($session, $message),
+            default          => OutboundReply::empty(),
         };
     }
 
@@ -96,14 +109,22 @@ class OnboardingFlow
             return OutboundReply::text("⚠️ الرجاء إرسال 1 أو 2 أو 3.");
         }
 
-        // Already registered — just toggle the role and bounce back to the menu.
-        if ($session->getUser()) {
-            return $this->grantRoleToExistingUser($session, $msg === '2');
+        // Owner path (option 2) collects a phone number first — a space owner
+        // must be reachable — then continues to account creation / role switch
+        // and on to registering their park. The channel-native chat id is
+        // always preserved.
+        if ($msg === '2') {
+            return $this->beginOwnerOnboarding($session);
         }
 
-        // Brand-new user — create the account automatically using the
+        // Driver path (option 1). Already registered — just toggle the role
+        // and bounce back to the menu; otherwise create the account using the
         // channel-native identifier. No confirmation prompt.
-        return $this->createAccount($session, $msg === '2');
+        if ($session->getUser()) {
+            return $this->grantRoleToExistingUser($session, asOwner: false);
+        }
+
+        return $this->createAccount($session, asOwner: false);
     }
 
     /**
@@ -160,6 +181,186 @@ class OnboardingFlow
             "📝 ما اسمك؟ سيظهر هذا الاسم لمالك الموقف عند وصولك.\n"
             . "_أرسل اسمك، أو أرسل *تخطي* لاستخدام اسم افتراضي._"
         );
+    }
+
+    /**
+     * Entry point for the space-owner path (option 2).
+     *
+     * A park owner must be reachable, so we collect a phone number before
+     * anything else. WhatsApp already carries the number (the wa_id), so the
+     * gate is skipped there; on Telegram — where the account is keyed by
+     * chat id and has no phone — we ask the owner to share their contact.
+     * Once a usable number is on file we continue exactly as before: brand-new
+     * owners create an account, existing users just switch role, and either
+     * way they land on the owner menu to register their park.
+     */
+    private function beginOwnerOnboarding(BotSession $session): OutboundReply
+    {
+        if ($this->ownerPhoneRequired($session)) {
+            $data = $session->getData();
+            $data['as_owner'] = true;
+
+            $session->update([
+                'step'       => self::PHONE_STEP,
+                'data'       => $data,
+                'expires_at' => now()->addMinutes(self::TTL_MINUTES),
+            ]);
+
+            return $this->ownerPhonePrompt();
+        }
+
+        // Phone already on file (or native to the channel) — proceed straight
+        // to the normal owner path.
+        return $session->getUser()
+            ? $this->grantRoleToExistingUser($session, asOwner: true)
+            : $this->createAccount($session, asOwner: true);
+    }
+
+    /**
+     * Whether the owner path still needs a phone number.
+     *
+     * Existing users need one only when their stored number isn't usable.
+     * A brand-new WhatsApp user carries their number as the wa_id, so only
+     * brand-new Telegram (chat-id-only) accounts must share it.
+     */
+    private function ownerPhoneRequired(BotSession $session): bool
+    {
+        $user = $session->getUser();
+
+        if ($user !== null) {
+            return !$this->isPhoneUsable($user->phone_number);
+        }
+
+        if ($session->getChannel() === 'whatsapp'
+            && $this->isPhoneUsable($session->getRecipient())) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * The yes / no share-permission prompt shown to a registering owner.
+     */
+    private function ownerPhonePrompt(): OutboundReply
+    {
+        return OutboundReply::buttons(
+            body: "📱 لتسجيل موقفك نحتاج رقم هاتفك ليتمكن الزبائن وفريق الدعم من التواصل معك.\n\n"
+                . "هل تسمح بمشاركة رقمك؟",
+            options: [
+                ['id' => self::PHONE_YES, 'title' => '✅ نعم، مشاركة رقمي'],
+                ['id' => self::PHONE_NO,  'title' => '❌ لا'],
+            ],
+        );
+    }
+
+    /**
+     * Handle one inbound message while collecting the owner's phone.
+     *
+     * The number is mandatory and can only be supplied by the owner sharing
+     * their OWN contact via the native button (tagged by the parser with
+     * {@see ConversationEngine::CONTACT_PAYLOAD_PREFIX}). Tapping "no", typing
+     * digits, sharing someone else's contact, or any unrelated message
+     * cancels registration — no owner account is ever created without a real,
+     * self-shared number.
+     */
+    private function handleOwnerPhone(BotSession $session, string $message): OutboundReply
+    {
+        $raw = trim($message);
+
+        // Owner agreed — surface the native "share contact" button.
+        if ($raw === self::PHONE_YES) {
+            return OutboundReply::requestContact(
+                body: "اضغط الزر بالأسفل لمشاركة رقمك تلقائياً 👇",
+                buttonLabel: '📱 مشاركة رقمي',
+            );
+        }
+
+        // A genuine self-shared contact is the ONLY accepted input.
+        if (str_starts_with($raw, ConversationEngine::CONTACT_PAYLOAD_PREFIX)) {
+            $digits = substr($raw, strlen(ConversationEngine::CONTACT_PAYLOAD_PREFIX));
+
+            if ($this->isPlausiblePhone($digits)) {
+                return $this->onOwnerPhoneCaptured($session, $digits);
+            }
+        }
+
+        // Anything else cancels registration — the number is required and
+        // must be self-shared via the button. No account has been created or
+        // role changed at this stage, so cancelling simply resets the session.
+        $session->reset();
+
+        return OutboundReply::text(
+            "❌ تم إلغاء التسجيل.\n"
+            . "لتسجيل موقفك يجب الضغط على *نعم* ثم مشاركة رقمك عبر الزر."
+        );
+    }
+
+    /**
+     * A usable phone has arrived. Store it, then continue the owner path:
+     * an existing user just switches role; a brand-new owner stashes the
+     * number so account creation persists it, then names / finalizes.
+     */
+    private function onOwnerPhoneCaptured(BotSession $session, string $digits): OutboundReply
+    {
+        $user = $session->getUser();
+
+        if ($user !== null) {
+            $user->forceFill(['phone_number' => $digits])->save();
+
+            return $this->grantRoleToExistingUser($session, asOwner: true);
+        }
+
+        $data                 = $session->getData();
+        $data['shared_phone'] = $digits;
+        $data['as_owner']     = true;
+
+        $session->update([
+            'data'       => $data,
+            'expires_at' => now()->addMinutes(self::TTL_MINUTES),
+        ]);
+
+        // Reuse the same name-or-finalize tail the driver path uses, but with
+        // the phone already captured so the created account carries it.
+        if ($this->resolveDisplayName($session) !== null) {
+            return $this->finalizeAccount($session, asOwner: true);
+        }
+
+        $session->update([
+            'step'       => 'ask_name',
+            'expires_at' => now()->addMinutes(self::TTL_MINUTES),
+        ]);
+
+        return OutboundReply::text(
+            "📝 ما اسمك؟ سيظهر هذا الاسم عند إدارة موقفك.\n"
+            . "_أرسل اسمك، أو أرسل *تخطي* لاستخدام اسم افتراضي._"
+        );
+    }
+
+    /**
+     * Whether a value already on the user record is a plausible phone.
+     * Lenient about formatting (a leading "+", spaces or dashes are ignored).
+     */
+    private function isPhoneUsable(?string $phone): bool
+    {
+        if (blank($phone)) {
+            return false;
+        }
+
+        $digits = preg_replace('/\D/', '', $phone);
+
+        return strlen((string) $digits) >= self::PHONE_MIN_DIGITS
+            && strlen((string) $digits) <= self::PHONE_MAX_DIGITS;
+    }
+
+    /**
+     * A digits-only sanity check on a freshly shared contact.
+     */
+    private function isPlausiblePhone(string $digits): bool
+    {
+        return ctype_digit($digits)
+            && strlen($digits) >= self::PHONE_MIN_DIGITS
+            && strlen($digits) <= self::PHONE_MAX_DIGITS;
     }
 
     /**
@@ -247,6 +448,14 @@ class OnboardingFlow
             $attrs['telegram_chat_id'] = $recipient;
         } else {
             $attrs['phone_number'] = $recipient;
+        }
+
+        // A phone shared during owner onboarding is stored regardless of
+        // channel, so a Telegram owner gets a real phone_number while still
+        // keeping their chat id as the primary identifier.
+        $sharedPhone = $session->getData()['shared_phone'] ?? null;
+        if (is_string($sharedPhone) && $sharedPhone !== '') {
+            $attrs['phone_number'] = $sharedPhone;
         }
 
         $user = User::create($attrs);

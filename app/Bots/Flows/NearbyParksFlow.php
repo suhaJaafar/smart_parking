@@ -379,6 +379,7 @@ class NearbyParksFlow
 
         return OutboundReply::text(
             "✅ تم حجز مكان لك في *{$choice['name']}*\n\n"
+            . "� رمز الحجز: *{$reserve->booking_code}*\n"
             . "🗺️ للاتجاهات: [اضغط هنا]({$mapsUrl})\n"
             . "⏰ صالح حتّى الساعة {$expires}\n"
             . "💰 سعر الحجز: *{$priceText}* (يُخصم مرة واحدة)\n\n"
@@ -413,6 +414,7 @@ class NearbyParksFlow
             $message = "🔔 *حجز جديد في موقفك*\n\n"
                      . "الموقف: *{$park->name}*\n"
                      . "الزبون: *{$customerName}*\n"
+                     . "🔢 رمز الحجز: *{$reserve->booking_code}*\n"
                      . $contactLine
                      . "صالح حتّى الساعة: {$expires}\n"
                      . "الأماكن المتبقية: *{$park->free_spaces}*\n\n"
