@@ -10,7 +10,7 @@ use App\Bots\Support\DigitNormalizer;
 use App\Bots\Support\Prompt;
 use App\Models\Park;
 use App\Models\Reserve;
-use App\Repositories\Contracts\ParkRepositoryInterface;
+use App\Queries\NearbyParksQuery;
 use App\Services\Payments\PaymentService;
 use App\Services\ReservationService;
 use Illuminate\Support\Carbon;
@@ -54,7 +54,7 @@ class PreBookingFlow
     private const CONFIRM_WORDS = ['تم الحجز', 'تم', 'تأكيد', 'confirm', 'دفع', 'pay'];
 
     public function __construct(
-        private readonly ParkRepositoryInterface $parks,
+        private readonly NearbyParksQuery $nearbyParks,
         private readonly ReservationService $reservations,
         private readonly PaymentService $payments,
         private readonly BotNotifier $notifier,
@@ -137,7 +137,7 @@ class PreBookingFlow
 
     private function showParks(BotSession $session, float $lat, float $lng): OutboundReply
     {
-        $parks = $this->parks->nearby(
+        $parks = $this->nearbyParks->get(
             latitude:     $lat,
             longitude:    $lng,
             radiusMeters: self::RADIUS_METERS,

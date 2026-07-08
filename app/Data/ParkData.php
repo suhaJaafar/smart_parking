@@ -37,7 +37,7 @@ final class ParkData
     }
 
     /**
-     * Snake-cased array suitable for `ParkRepository::create()`.
+     * Snake-cased array suitable for `Park::create()`.
      * `freeSpaces` is materialised to `capacity` when null, and `price`
      * to {@see self::DEFAULT_PRICE}, so the parks table always gets a
      * concrete value.

@@ -5,28 +5,22 @@ namespace App\Services;
 use App\Data\LocationData;
 use App\Data\ParkData;
 use App\Enums\RoleTypes;
+use App\Models\Location;
 use App\Models\Park;
 use App\Models\Role;
 use App\Models\User;
-use App\Repositories\Contracts\LocationRepositoryInterface;
-use App\Repositories\Contracts\ParkRepositoryInterface;
 use Illuminate\Support\Facades\DB;
 
 /**
  * Orchestrates the multi-step business workflow of creating a park together
  * with its location, atomically.
  *
- * Why a service? Because this use case touches MORE THAN ONE repository and
- * needs transactional guarantees. A repository owns a single table; a service
- * owns a workflow.
+ * This is a *service / action*: it owns a business use-case that spans more
+ * than one table (locations + parks + roles) and needs transactional
+ * guarantees. Trivial single-table reads/writes stay on Eloquent directly.
  */
 class ParkService
 {
-    public function __construct(
-        private readonly ParkRepositoryInterface $parksInterface,
-        private readonly LocationRepositoryInterface $locationsInterface,
-    ) {}
-
     /**
      * Create a park and its location in one transaction.
      *
@@ -37,13 +31,25 @@ class ParkService
     public function createWithLocation(LocationData $location, ParkData $park, User $owner): Park
     {
         return DB::transaction(function () use ($location, $park, $owner) {
-            $locationRow = $this->locationsInterface->create($location->toArray());
+            $locationRow                = new Location();
+            $locationRow->country       = $location->country;
+            $locationRow->state         = $location->state;
+            $locationRow->city          = $location->city;
+            $locationRow->postal_code   = $location->postalCode;
+            $locationRow->extra_details = $location->extraDetails;
+            // Uses the `coordinates` mutator defined on the Location model,
+            // which translates lat/long into a PostGIS geography(POINT, 4326).
+            $locationRow->coordinates = [
+                'lat'  => $location->latitude,
+                'long' => $location->longitude,
+            ];
+            $locationRow->save();
 
-            $parkRow = $this->parksInterface->create([
+            $parkRow = Park::create([
                 ...$park->toArray(),
                 'user_id'     => $owner->id,
                 'location_id' => $locationRow->id,
-            ]);
+            ])->refresh();
 
             // Promote the creator to SPACE_OWNER (idempotent).
             $role = Role::firstOrCreate(['role' => RoleTypes::SPACE_OWNER->value]);
