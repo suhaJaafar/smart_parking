@@ -16,7 +16,7 @@ class Location extends Model
 
     // NOTE: `latitude` and `longitude` are read-only computed accessors backed by
     // the PostGIS `coordinates` column — they cannot be mass-assigned. Writes
-    // must go through the `coordinates` mutator (see LocationRepository).
+    // must go through the `coordinates` mutator (see below).
     protected $fillable = [
         'country',
         'city',

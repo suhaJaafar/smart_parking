@@ -10,8 +10,7 @@ use App\Enums\StateTypes;
  *
  * Lives at the service boundary so callers (HTTP controllers, bot flows,
  * console commands, tests, …) all speak the same shape instead of passing
- * loose arrays around. The repository layer keeps accepting arrays — this
- * DTO converts on the way down via {@see self::toArray()}.
+ * loose arrays around. Consumed directly by {@see \App\Services\ParkService}.
  */
 final class LocationData
 {
@@ -45,7 +44,8 @@ final class LocationData
     }
 
     /**
-     * Snake-cased array suitable for `LocationRepository::create()`.
+     * Snake-cased array representation of the payload. Kept for callers
+     * (tests, logging, …) that want a plain-array view of the DTO.
      */
     public function toArray(): array
     {

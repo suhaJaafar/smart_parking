@@ -4,7 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\NearbyParksRequest;
 use App\Http\Resources\NearbyParkResource;
-use App\Repositories\Contracts\ParkRepositoryInterface;
+use App\Queries\NearbyParksQuery;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 /**
@@ -14,7 +14,7 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 class CustomerController extends Controller
 {
     public function __construct(
-        private readonly ParkRepositoryInterface $parks,
+        private readonly NearbyParksQuery $nearbyParks,
     ) {}
 
     /**
@@ -27,7 +27,7 @@ class CustomerController extends Controller
     {
         $data = $request->validated();
 
-        $parks = $this->parks->nearby(
+        $parks = $this->nearbyParks->get(
             latitude:     (float) $data['latitude'],
             longitude:    (float) $data['longitude'],
             radiusMeters: (int) ($data['radius'] ?? 5000),

@@ -10,7 +10,7 @@ use App\Bots\Support\DigitNormalizer;
 use App\Bots\Support\Prompt;
 use App\Models\Park;
 use App\Models\Reserve;
-use App\Repositories\Contracts\ParkRepositoryInterface;
+use App\Queries\NearbyParksQuery;
 use App\Services\ReservationService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
@@ -49,7 +49,7 @@ class NearbyParksFlow
     private const CANCEL_RESERVE_ID = 'reserve_cancel';
 
     public function __construct(
-        private readonly ParkRepositoryInterface $parks,
+        private readonly NearbyParksQuery $nearbyParks,
         private readonly ReservationService $reservations,
         private readonly BotNotifier $notifier,
     ) {}
@@ -132,7 +132,7 @@ class NearbyParksFlow
 
     private function showParks(BotSession $session, float $lat, float $lng): OutboundReply
     {
-        $parks = $this->parks->nearby(
+        $parks = $this->nearbyParks->get(
             latitude:     $lat,
             longitude:    $lng,
             radiusMeters: self::RADIUS_METERS,

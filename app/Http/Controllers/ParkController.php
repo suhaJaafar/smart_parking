@@ -5,8 +5,8 @@ namespace App\Http\Controllers;
 use App\Http\Requests\ParkRequest;
 use App\Http\Requests\StoreParkRequest;
 use App\Http\Resources\ParkResource;
+use App\Models\Park;
 use App\Models\User;
-use App\Repositories\Contracts\ParkRepositoryInterface;
 use App\Services\ParkService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -17,8 +17,13 @@ use Symfony\Component\HttpFoundation\Response as HttpResponse;
 
 class ParkController extends Controller
 {
+    /**
+     * Eager-loads applied to every single-park lookup, so the API always
+     * returns the same shape (park + location + slim owner).
+     */
+    private const PARK_WITH = ['location', 'owner:id,name,email'];
+
     public function __construct(
-        private readonly ParkRepositoryInterface $parks,
         private readonly ParkService $parkService,
     ) {}
 
@@ -27,7 +32,9 @@ class ParkController extends Controller
      */
     public function index(): AnonymousResourceCollection
     {
-        return ParkResource::collection($this->parks->paginate(10));
+        return ParkResource::collection(
+            Park::with(self::PARK_WITH)->latest()->paginate(10)
+        );
     }
 
     /**
@@ -36,7 +43,10 @@ class ParkController extends Controller
     public function userParks(Request $request): AnonymousResourceCollection
     {
         return ParkResource::collection(
-            $this->parks->paginateByOwner($request->user(), 10)
+            Park::with(self::PARK_WITH)
+                ->where('user_id', $request->user()->id)
+                ->latest()
+                ->paginate(10)
         );
     }
 
@@ -62,14 +72,14 @@ class ParkController extends Controller
             owner:    $owner,
         );
 
-        return (new ParkResource($park->load(['location', 'owner:id,name,email'])))
+        return (new ParkResource($park->load(self::PARK_WITH)))
             ->response()
             ->setStatusCode(HttpResponse::HTTP_CREATED);
     }
 
     public function show(string $id): JsonResource
     {
-        $park = $this->parks->findById($id);
+        $park = Park::with(self::PARK_WITH)->find($id);
         abort_if($park === null, HttpResponse::HTTP_NOT_FOUND);
 
         return new ParkResource($park);
@@ -77,22 +87,22 @@ class ParkController extends Controller
 
     public function update(ParkRequest $request, string $id): JsonResource
     {
-        $park = $this->parks->findById($id);
+        $park = Park::with(self::PARK_WITH)->find($id);
         abort_if($park === null, HttpResponse::HTTP_NOT_FOUND);
         $this->authorize('update', $park);
 
-        $park = $this->parks->update($park, $request->validated());
+        $park->fill($request->validated())->save();
 
-        return new ParkResource($park->load(['location', 'owner:id,name,email']));
+        return new ParkResource($park->load(self::PARK_WITH));
     }
 
     public function destroy(Request $request, string $id): Response
     {
-        $park = $this->parks->findById($id);
+        $park = Park::find($id);
         abort_if($park === null, HttpResponse::HTTP_NOT_FOUND);
         $this->authorize('delete', $park);
 
-        $this->parks->delete($park);
+        $park->delete();
 
         return response()->noContent();
     }
@@ -103,7 +113,7 @@ class ParkController extends Controller
     // ===============================
     public function enterCar(string $id): JsonResponse
     {
-        $park = $this->parks->findById($id);
+        $park = Park::find($id);
         abort_if($park === null, HttpResponse::HTTP_NOT_FOUND);
 
         if ($park->free_spaces <= 0) {
@@ -119,7 +129,7 @@ class ParkController extends Controller
     // ===============================
     public function exitCar(string $id): JsonResponse
     {
-        $park = $this->parks->findById($id);
+        $park = Park::find($id);
         abort_if($park === null, HttpResponse::HTTP_NOT_FOUND);
         if ($park->free_spaces >= $park->capacity) {
             return response()->json(['message' => 'الموقف فارغ. لا توجد سيارات داخله.'], HttpResponse::HTTP_BAD_REQUEST);

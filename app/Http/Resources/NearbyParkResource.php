@@ -8,7 +8,7 @@ use Illuminate\Http\Resources\Json\JsonResource;
 /**
  * Park resource enriched with the distance from the customer's coordinates.
  * Expects `distance_meters` to be present on the underlying model
- * (set via a `selectRaw` in ParkRepository::nearby()).
+ * (set via a `selectRaw` in {@see \App\Queries\NearbyParksQuery}).
  */
 class NearbyParkResource extends JsonResource
 {
