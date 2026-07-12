@@ -109,7 +109,7 @@ class ParkCreationFlow
         $this->merge($session, ['capacity' => $cap, 'free_spaces' => $cap], 'price');
 
         return OutboundReply::text(
-            Prompt::ask("💰 ما سعر الحجز الواحد؟ (بالدينار العراقي — يُخصم مرة واحدة عند دخول السيارة)")
+            Prompt::ask("💰 ما سعر الحجز الواحد؟ (بالدينار العراقي)")
         );
     }
 
@@ -170,7 +170,7 @@ class ParkCreationFlow
 
         $cityLine = $city ? "المدينة: {$city}\n" : '';
         $priceLine = 'السعر: ' . number_format((float) $park->price, 0)
-                   . ' ' . config('services.qicard.currency') . " (يُخصم مرة واحدة)\n";
+                   . ' ' . config('services.qicard.currency') . "\n";
         $body = "✅ تم إنشاء الموقف!\n"
               . "الاسم: {$park->name}\n"
               . "السعة: {$park->capacity}\n"

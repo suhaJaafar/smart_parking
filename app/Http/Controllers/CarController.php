@@ -8,7 +8,6 @@ use App\Models\Car;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
-use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Http\Response;
 use Symfony\Component\HttpFoundation\Response as HttpResponse;
 
@@ -36,7 +35,7 @@ class CarController extends Controller
             ->setStatusCode(HttpResponse::HTTP_CREATED);
     }
 
-    public function show(string $id): JsonResource
+    public function show(string $id): CarResource
     {
         $car = Car::findOrFail($id);
         return new CarResource($car);
@@ -45,7 +44,7 @@ class CarController extends Controller
     /**
      * Update a car the authenticated user owns.
      */
-    public function update(CarRequest $request, string $id): JsonResource
+    public function update(CarRequest $request, string $id): CarResource
     {
         $car = Car::findOrFail($id);
         $this->authorizeOwnership($request, $car);

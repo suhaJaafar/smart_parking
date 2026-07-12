@@ -77,7 +77,7 @@ class ParkController extends Controller
             ->setStatusCode(HttpResponse::HTTP_CREATED);
     }
 
-    public function show(string $id): JsonResource
+    public function show(string $id): ParkResource
     {
         $park = Park::with(self::PARK_WITH)->find($id);
         abort_if($park === null, HttpResponse::HTTP_NOT_FOUND);
@@ -85,7 +85,7 @@ class ParkController extends Controller
         return new ParkResource($park);
     }
 
-    public function update(ParkRequest $request, string $id): JsonResource
+    public function update(ParkRequest $request, string $id): ParkResource
     {
         $park = Park::with(self::PARK_WITH)->find($id);
         abort_if($park === null, HttpResponse::HTTP_NOT_FOUND);

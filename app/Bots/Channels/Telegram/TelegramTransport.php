@@ -5,7 +5,7 @@ namespace App\Bots\Channels\Telegram;
 use App\Bots\Contracts\BotSession;
 use App\Bots\Contracts\BotTransport;
 use App\Bots\Dto\OutboundReply;
-use App\Bots\Support\BidiText;
+use App\Bots\Support\RTLText;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -167,7 +167,7 @@ class TelegramTransport implements BotTransport
     private function dispatch(string $method, array $payload): bool
     {
         if (isset($payload['text']) && is_string($payload['text'])) {
-            $payload['text'] = BidiText::rtl($payload['text']);
+            $payload['text'] = RTLText::rtl($payload['text']);
         }
 
         // Suppress the large link-preview card so masked links stay tidy.

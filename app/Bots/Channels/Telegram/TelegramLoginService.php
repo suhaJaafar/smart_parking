@@ -8,7 +8,7 @@ use App\Models\User;
 use Illuminate\Support\Facades\Cache;
 
 /**
- * NOTE: This code file written by AI
+ * NOTE: This code file written by Claude Opus AI
  * Issue and verify one-time codes that let a Telegram user sign in to the
  * web dashboard.
  *
