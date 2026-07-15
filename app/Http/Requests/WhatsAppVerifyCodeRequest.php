@@ -17,11 +17,11 @@ class WhatsAppVerifyCodeRequest extends FormRequest
 
     public function rules(): array
     {
-        $len = WhatsAppOtpService::CODE_LENGTH;
+        // $len = WhatsAppOtpService::CODE_LENGTH;
 
         return [
             'phone_number' => ['required', 'string', 'regex:/^\+?[0-9]{8,15}$/'],
-            'code'         => ['required', 'string', "size:{$len}", 'regex:/^[0-9]+$/'],
+            'code'         => ['required', 'string', 'size:6', 'regex:/^[0-9]+$/'],
         ];
     }
 

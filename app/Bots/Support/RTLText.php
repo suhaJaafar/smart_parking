@@ -12,7 +12,7 @@ namespace App\Bots\Support;
  * Right-to-Left Mark (U+200F) forces the whole message to read RTL while
  * staying invisible to the reader and harmless to Markdown parsing.
  */
-final class BidiText
+final class RTLText
 {
     /** Right-to-Left Mark (U+200F). */
     private const RLM = "\u{200F}";

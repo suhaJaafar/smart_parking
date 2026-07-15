@@ -34,7 +34,7 @@ class NearbyParksFlow
     public const FLOW = 'nearby_parks';
     private const TTL_MINUTES = 10;
     private const RADIUS_METERS = 5000;
-    private const LIMIT = 5;
+    private const LIMIT = 10;
 
     /** Prefix used to tag a tapped park button so it round-trips as inbound text. */
     private const PARK_OPTION_PREFIX = 'park:';
@@ -249,7 +249,7 @@ class NearbyParksFlow
         $price = number_format((float) $park->price, 0) . ' ' . config('services.qicard.currency');
 
         $body = "📍 لقد اخترت: *{$choice['name']}*\n"
-              . "💰 سعر الحجز: *{$price}* (يُخصم مرة واحدة)\n"
+              . "💰 سعر الحجز: *{$price}*\n"
               . "🅿️ الأماكن المتاحة: *{$park->free_spaces}*\n\n"
               . "هل تؤكّد الحجز في هذا الموقف؟";
 
@@ -382,7 +382,7 @@ class NearbyParksFlow
             . "� رمز الحجز: *{$reserve->booking_code}*\n"
             . "🗺️ للاتجاهات: [اضغط هنا]({$mapsUrl})\n"
             . "⏰ صالح حتّى الساعة {$expires}\n"
-            . "💰 سعر الحجز: *{$priceText}* (يُخصم مرة واحدة)\n\n"
+            . "💰 سعر الحجز: *{$priceText}*\n\n"
             . "🚗 عند وصولك سيؤكّد صاحب الموقف دخول سيارتك مباشرةً.\n"
             . "إذا لم تصل قبل الوقت المحدد سيتم إلغاء الحجز تلقائياً."
         );

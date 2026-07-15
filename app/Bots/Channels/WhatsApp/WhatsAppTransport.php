@@ -5,7 +5,7 @@ namespace App\Bots\Channels\WhatsApp;
 use App\Bots\Contracts\BotSession;
 use App\Bots\Contracts\BotTransport;
 use App\Bots\Dto\OutboundReply;
-use App\Bots\Support\BidiText;
+use App\Bots\Support\RTLText;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -185,10 +185,10 @@ class WhatsAppTransport implements BotTransport
     private function forceRtl(array $payload): array
     {
         if (isset($payload['text']['body']) && is_string($payload['text']['body'])) {
-            $payload['text']['body'] = BidiText::rtl($this->flattenLinks($payload['text']['body']));
+            $payload['text']['body'] = RTLText::rtl($this->flattenLinks($payload['text']['body']));
         }
         if (isset($payload['interactive']['body']['text']) && is_string($payload['interactive']['body']['text'])) {
-            $payload['interactive']['body']['text'] = BidiText::rtl($this->flattenLinks($payload['interactive']['body']['text']));
+            $payload['interactive']['body']['text'] = RTLText::rtl($this->flattenLinks($payload['interactive']['body']['text']));
         }
 
         return $payload;
