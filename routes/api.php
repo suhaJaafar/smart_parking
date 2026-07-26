@@ -8,6 +8,7 @@ use App\Http\Controllers\CoOwnerRequestController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\OwnerCarController;
 use App\Http\Controllers\OwnerController;
+use App\Http\Controllers\OwnerReservationController;
 use App\Http\Controllers\ParkController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\UserController;
@@ -73,6 +74,14 @@ Route::middleware('auth:api')->group(function () {
         Route::get('owner/cars/{id}', [OwnerCarController::class, 'show']);
         Route::put('owner/cars/{id}', [OwnerCarController::class, 'update']);
         Route::delete('owner/cars/{id}', [OwnerCarController::class, 'destroy']);
+
+        // Reservations across the owner's garages. Read-only browsing plus
+        // two lifecycle transitions (cancel a hold, exit a car) that reuse
+        // the exact services the bot uses — no delete, ever.
+        Route::get('owner/reservations', [OwnerReservationController::class, 'index']);
+        Route::get('owner/reservations/{id}', [OwnerReservationController::class, 'show']);
+        Route::post('owner/reservations/{id}/cancel', [OwnerReservationController::class, 'cancel']);
+        Route::post('owner/reservations/{id}/exit', [OwnerReservationController::class, 'exitCar']);
     });
 
     // Customer-only routes
