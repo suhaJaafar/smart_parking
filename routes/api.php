@@ -9,6 +9,7 @@ use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\OwnerCarController;
 use App\Http\Controllers\OwnerController;
 use App\Http\Controllers\OwnerReservationController;
+use App\Http\Controllers\ReservationStatsController;
 use App\Http\Controllers\ParkController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\UserController;
@@ -57,6 +58,9 @@ Route::middleware('auth:api')->group(function () {
     // Admin-only routes
     Route::middleware('role:ADMIN,SUPER_ADMIN')->group(function () {
         Route::get('admin/stats', [AdminController::class, 'stats']);
+
+        // Platform-wide reservations analytics.
+        Route::get('admin/reservation-stats', [ReservationStatsController::class, 'admin']);
     });
 
     // Space-owner routes — scoped to the authenticated user's own parks.
@@ -82,6 +86,9 @@ Route::middleware('auth:api')->group(function () {
         Route::get('owner/reservations/{id}', [OwnerReservationController::class, 'show']);
         Route::post('owner/reservations/{id}/cancel', [OwnerReservationController::class, 'cancel']);
         Route::post('owner/reservations/{id}/exit', [OwnerReservationController::class, 'exitCar']);
+
+        // Owner-scoped reservations analytics.
+        Route::get('owner/reservation-stats', [ReservationStatsController::class, 'owner']);
     });
 
     // Customer-only routes
