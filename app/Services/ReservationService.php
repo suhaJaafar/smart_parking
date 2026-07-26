@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Bots\Contracts\BotNotifier;
+use App\Bots\Dto\OutboundReply;
 use App\Enums\PaymentStatusTypes;
 use App\Models\Car;
 use App\Models\Park;
@@ -13,6 +15,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
+use Throwable;
 
 class ReservationService
 {
@@ -70,6 +73,7 @@ class ReservationService
     public function __construct(
         private readonly PaymentService $payments,
         private readonly CarService $cars,
+        private readonly BotNotifier $notifier,
     ) {}
 
     /**
@@ -105,15 +109,35 @@ class ReservationService
             // the customer's car is already inside — also a duplicate. Checked
             // first so a repeat tap idempotently returns the same hold instead
             // of tripping the capacity gate below.
+            //
+            // Crucially, only *live* pending holds count — a STATUS_START whose
+            // TTL has already lapsed (but hasn't been flipped to EXPIRED yet by
+            // the sweep) must NOT be reused: doing so re-uses its stale
+            // expires_at and booking_code in the owner notification and locks
+            // the customer out of ever re-reserving because the entry picker
+            // (which uses the same livePending filter) will never surface it.
             $existing = Reserve::where('user_id', $user->id)
                 ->where('park_id', $locked->id)
-                ->whereIn('status', [Reserve::STATUS_START, Reserve::STATUS_ACTIVE])
+                ->where(function ($q) {
+                    $q->livePending()
+                        ->orWhere('status', Reserve::STATUS_ACTIVE);
+                })
                 ->lockForUpdate()
                 ->first();
 
             if ($existing) {
                 return $existing;
             }
+
+            // Any leftover stale START rows for this (user, park) pair are
+            // effectively dead — flip them to EXPIRED now so the DB history
+            // stays clean and the sweep has less to do. This is a no-op when
+            // there is none, and is safe here because we already established
+            // above that no *live* duplicate exists.
+            Reserve::where('user_id', $user->id)
+                ->where('park_id', $locked->id)
+                ->where('status', Reserve::STATUS_START)
+                ->update(['status' => Reserve::STATUS_EXPIRED]);
 
             // A hold no longer debits free_spaces — the slot is claimed only
             // when the car physically enters the park. We still guard against
@@ -294,15 +318,20 @@ class ReservationService
             ->pluck('id');
 
         foreach ($staleIds as $id) {
-            DB::transaction(function () use ($id, &$count) {
+            // The transaction returns the row that was just expired so we can
+            // notify customer + owner *outside* the DB critical section —
+            // messaging is best-effort I/O and must never hold a row lock or
+            // fail the sweep. Null means the row was already handled (paid,
+            // re-activated, or expired by a concurrent worker).
+            $expired = DB::transaction(function () use ($id, &$count): ?Reserve {
                 $reserve = Reserve::whereKey($id)->lockForUpdate()->first();
 
                 if (!$reserve || $reserve->status !== Reserve::STATUS_START) {
-                    return;
+                    return null;
                 }
 
                 if ($reserve->expires_at === null || $reserve->expires_at->isFuture()) {
-                    return;
+                    return null;
                 }
 
                 // A paid pre-booking must never be auto-released: the
@@ -312,17 +341,94 @@ class ReservationService
                     ->exists();
 
                 if ($paid) {
-                    return;
+                    return null;
                 }
 
                 // A START hold never debited free_spaces, so expiry only
                 // releases the hold — there is no slot to refund.
                 $reserve->update(['status' => Reserve::STATUS_EXPIRED]);
                 $count++;
+
+                return $reserve->fresh(['user', 'park.owner']);
             });
+
+            if ($expired !== null) {
+                $this->notifyHoldExpired($expired);
+            }
         }
 
         return $count;
+    }
+
+    /**
+     * Best-effort "your hold expired" notification, sent after the row has
+     * been flipped to EXPIRED. Delivers a short Arabic message to BOTH the
+     * customer ("reserve again to enter") and the park owner ("this hold is
+     * no longer valid; ask the customer to reserve again"), through
+     * {@see BotNotifier} so it reaches every channel each user is enrolled
+     * on. Failures are logged and never propagate — messaging must never
+     * break the sweep or roll back the state change.
+     */
+    private function notifyHoldExpired(Reserve $reserve): void
+    {
+        $customer = $reserve->user;
+        $park     = $reserve->park;
+        $owner    = $park?->owner;
+        $parkName = $park?->name ?? '—';
+        $code     = $reserve->booking_code;
+
+        // Customer: they need to know their hold lapsed and the fix is to
+        // reserve again — no penalty, no slot debited.
+        if ($customer !== null) {
+            try {
+                $codeLine = $code ? "🔢 رمز الحجز: *{$code}*\n" : '';
+
+                $this->notifier->notify(
+                    $customer,
+                    OutboundReply::text(
+                        "⏰ *انتهت مدة حجزك*\n\n"
+                        . "الموقف: *{$parkName}*\n"
+                        . $codeLine
+                        . "\nلم يتم إدخال سيارتك خلال الوقت المحدد، فتم إلغاء الحجز تلقائياً.\n"
+                        . "يمكنك حجز مكان مرة أخرى بإرسال موقعك أو رقم *4⃣*."
+                    ),
+                );
+            } catch (Throwable $e) {
+                Log::warning('Customer hold-expired notification failed', [
+                    'reserve_id' => $reserve->id,
+                    'user_id'    => $customer->id,
+                    'error'      => $e->getMessage(),
+                ]);
+            }
+        }
+
+        // Owner: mirrors the "new reservation" ping in NearbyParksFlow so
+        // they can drop the stale row from mental state and know why the
+        // waiting list changed. Kept short — no action required from them.
+        if ($owner !== null) {
+            try {
+                $customerName = $customer?->name ?: 'زبون';
+                $codeLine     = $code ? "🔢 رمز الحجز: *{$code}*\n" : '';
+
+                $this->notifier->notify(
+                    $owner,
+                    OutboundReply::text(
+                        "⏰ *انتهت مدة حجز في موقفك*\n\n"
+                        . "الموقف: *{$parkName}*\n"
+                        . "الزبون: *{$customerName}*\n"
+                        . $codeLine
+                        . "\nلم يصل الزبون في الوقت المحدد، فتم إلغاء الحجز تلقائياً.\n"
+                        . "_إذا وصل، اطلب منه إعادة الحجز ليظهر في قائمة الواصلين._"
+                    ),
+                );
+            } catch (Throwable $e) {
+                Log::warning('Owner hold-expired notification failed', [
+                    'reserve_id' => $reserve->id,
+                    'owner_id'   => $owner->id,
+                    'error'      => $e->getMessage(),
+                ]);
+            }
+        }
     }
 
     /**
