@@ -8,13 +8,13 @@ use App\Http\Controllers\CoOwnerRequestController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\OwnerCarController;
 use App\Http\Controllers\OwnerController;
+use App\Http\Controllers\OwnerParkUserController;
 use App\Http\Controllers\OwnerReservationController;
-use App\Http\Controllers\ReservationStatsController;
 use App\Http\Controllers\ParkController;
 use App\Http\Controllers\PaymentController;
+use App\Http\Controllers\ReservationStatsController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
-
 
 Route::post('register', [AuthController::class, 'register']);
 Route::post('login', [AuthController::class, 'login']);
@@ -22,15 +22,15 @@ Route::post('login', [AuthController::class, 'login']);
 // login and send otp for whatsapp / telegram accounts creates by bot .
 Route::middleware('throttle:10,1')->group(function () {
     Route::post('auth/whatsapp/request-code', [AuthController::class, 'requestWhatsAppCode']);
-    Route::post('auth/whatsapp/verify-code',  [AuthController::class, 'verifyWhatsAppCode']);
-    Route::post('auth/telegram/verify-code',  [AuthController::class, 'verifyTelegramCode']);
+    Route::post('auth/whatsapp/verify-code', [AuthController::class, 'verifyWhatsAppCode']);
+    Route::post('auth/telegram/verify-code', [AuthController::class, 'verifyTelegramCode']);
 });
 
 Route::middleware('auth:api')->group(function () {
     Route::get('user', [AuthController::class, 'user']);
     Route::post('logout', [AuthController::class, 'logout']);
 
-      // users routes — privileged user management, SUPER_ADMIN only.
+    // users routes — privileged user management, SUPER_ADMIN only.
     Route::prefix('users')->group(function () {
         Route::middleware('role:SUPER_ADMIN')->group(function () {
             Route::get('/', [UserController::class, 'index']);
@@ -54,7 +54,6 @@ Route::middleware('auth:api')->group(function () {
         Route::post('{id}/exitcar', [ParkController::class, 'exitCar']);
     });
 
-
     // Admin-only routes
     Route::middleware('role:ADMIN,SUPER_ADMIN')->group(function () {
         Route::get('admin/stats', [AdminController::class, 'stats']);
@@ -75,14 +74,24 @@ Route::middleware('auth:api')->group(function () {
         // Cars inside the owner's garages — full CRUD, scoped to owned parks.
         Route::get('owner/cars', [OwnerCarController::class, 'index']);
         Route::post('owner/cars', [OwnerCarController::class, 'store']);
+        // Historical parking sessions (cars that entered & left) + CSV export.
+        // Registered before `owner/cars/{id}` so the static segments win.
+        Route::get('owner/park-cars/history', [OwnerCarController::class, 'history']);
+        Route::get('owner/park-cars/history/export', [OwnerCarController::class, 'exportHistory']);
         Route::get('owner/cars/{id}', [OwnerCarController::class, 'show']);
         Route::put('owner/cars/{id}', [OwnerCarController::class, 'update']);
         Route::delete('owner/cars/{id}', [OwnerCarController::class, 'destroy']);
 
+        // Customers who have ever reserved at the owner's garages + CSV export.
+        Route::get('owner/park-users', [OwnerParkUserController::class, 'index']);
+        Route::get('owner/park-users/export', [OwnerParkUserController::class, 'export']);
+
         // Reservations across the owner's garages. Read-only browsing plus
         // two lifecycle transitions (cancel a hold, exit a car) that reuse
         // the exact services the bot uses — no delete, ever.
+        // `export` is registered before `{id}` so it isn't captured as an id.
         Route::get('owner/reservations', [OwnerReservationController::class, 'index']);
+        Route::get('owner/reservations/export', [OwnerReservationController::class, 'export']);
         Route::get('owner/reservations/{id}', [OwnerReservationController::class, 'show']);
         Route::post('owner/reservations/{id}/cancel', [OwnerReservationController::class, 'cancel']);
         Route::post('owner/reservations/{id}/exit', [OwnerReservationController::class, 'exitCar']);

@@ -2,12 +2,15 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Concerns\ResolvesDateRange;
+use App\Http\Requests\ParkHistoryRequest;
 use App\Http\Resources\OwnerReservationResource;
 use App\Models\Car;
 use App\Models\Reserve;
 use App\Models\User;
 use App\Services\CarService;
 use App\Services\ReservationService;
+use App\Support\CsvExporter;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -15,6 +18,7 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Throwable;
 
 /**
@@ -33,6 +37,8 @@ use Throwable;
  */
 class OwnerReservationController extends Controller
 {
+    use ResolvesDateRange;
+
     /**
      * Relations every response payload needs — eager-loaded up front so
      * {@see OwnerReservationResource} never triggers an N+1 query.
@@ -69,15 +75,85 @@ class OwnerReservationController extends Controller
      * Supported filters:
      *   ?park_id=<uuid>         narrow to a single owned park
      *   ?filter=live|waiting|active|history|all
-     *     live      (default) — waiting + active
+     *     all       (default) — every status
+     *     live      — waiting + active
      *     waiting   — live pending holds only (see Reserve::livePending)
      *     active    — cars physically inside
      *     history   — completed + expired + cancelled
-     *     all       — everything (no status filter)
      */
     public function index(Request $request): AnonymousResourceCollection
     {
-        $owner   = $request->user();
+        return OwnerReservationResource::collection(
+            $this->scopedQuery($request)->paginate(20)
+        );
+    }
+
+    /**
+     * Stream every reservation matching the current filter + garage + date
+     * window as a CSV (Excel-compatible) download.
+     *
+     * Uses the exact same scoping and filter logic as {@see index()} so the
+     * exported file always mirrors what the operator sees on screen, but
+     * without pagination — the whole matching set is streamed lazily.
+     */
+    public function export(ParkHistoryRequest $request): StreamedResponse
+    {
+        $query = $this->scopedQuery($request);
+
+        [$from, $to] = $this->dateBounds(
+            $request->validated('from'),
+            $request->validated('to'),
+        );
+        if ($from !== null) {
+            $query->where('created_at', '>=', $from);
+        }
+        if ($to !== null) {
+            $query->where('created_at', '<=', $to);
+        }
+
+        $headers = [
+            'Booking code', 'Status', 'Type', 'Garage', 'Customer', 'Phone',
+            'Plate', 'Model', 'Created at', 'Last update', 'Scheduled at',
+        ];
+
+        $rows = function () use ($query) {
+            foreach ($query->lazy() as $reserve) {
+                $car = $reserve->user?->cars?->first();
+
+                yield [
+                    $reserve->booking_code,
+                    $this->statusLabel((int) $reserve->status),
+                    $reserve->is_pre_booking ? 'Pre-booking' : 'On-site',
+                    $reserve->park?->name,
+                    $reserve->user?->name,
+                    $reserve->user?->phone_number,
+                    $car ? trim("{$car->plate_prefix}-{$car->car_number}", '-') : null,
+                    $car?->model,
+                    $reserve->created_at?->toDateTimeString(),
+                    $reserve->updated_at?->toDateTimeString(),
+                    $reserve->scheduled_at?->toDateTimeString(),
+                ];
+            }
+        };
+
+        return CsvExporter::stream(
+            $this->exportFilename('reservations', $from, $to),
+            $headers,
+            $rows(),
+        );
+    }
+
+    /**
+     * Owner-scoped reservation query shared by {@see index()} and
+     * {@see export()}: every reservation in the owner's garages, newest
+     * first, narrowed by an optional single garage and lifecycle filter.
+     * `filter` defaults to `all`; see {@see applyFilter()} for the buckets.
+     *
+     * @return Builder<Reserve>
+     */
+    private function scopedQuery(Request $request): Builder
+    {
+        $owner = $request->user();
         $parkIds = $this->ownedParkIds($owner);
 
         $query = Reserve::query()
@@ -85,15 +161,14 @@ class OwnerReservationController extends Controller
             ->with($this->responseRelations())
             ->latest('created_at');
 
-        $parkId = $request->query('park_id');
+        $parkId = $request->input('park_id');
         if (is_string($parkId) && $parkIds->contains($parkId)) {
             $query->where('park_id', $parkId);
         }
 
-        $filter = (string) $request->query('filter', 'live');
-        $this->applyFilter($query, $filter);
+        $this->applyFilter($query, (string) $request->input('filter', 'all'));
 
-        return OwnerReservationResource::collection($query->paginate(20));
+        return $query;
     }
 
     /**
@@ -135,7 +210,7 @@ class OwnerReservationController extends Controller
 
         return response()->json([
             'message' => 'Reservation cancelled.',
-            'data'    => new OwnerReservationResource(
+            'data' => new OwnerReservationResource(
                 $reserve->load($this->responseRelations())
             ),
         ]);
@@ -167,7 +242,7 @@ class OwnerReservationController extends Controller
         }
 
         $park = $reserve->park;
-        if (!$park) {
+        if (! $park) {
             throw ValidationException::withMessages([
                 'park_id' => 'This reservation is no longer attached to a park.',
             ]);
@@ -183,8 +258,8 @@ class OwnerReservationController extends Controller
             } else {
                 Log::warning('Owner dashboard exit: no car found for ACTIVE reservation', [
                     'reserve_id' => $reserve->id,
-                    'user_id'    => $reserve->user_id,
-                    'park_id'    => $park->id,
+                    'user_id' => $reserve->user_id,
+                    'park_id' => $park->id,
                 ]);
             }
 
@@ -195,7 +270,7 @@ class OwnerReservationController extends Controller
         } catch (Throwable $e) {
             Log::error('Owner dashboard exit failed', [
                 'reserve_id' => $reserve->id,
-                'error'      => $e->getMessage(),
+                'error' => $e->getMessage(),
             ]);
 
             throw ValidationException::withMessages([
@@ -207,7 +282,7 @@ class OwnerReservationController extends Controller
 
         return response()->json([
             'message' => 'Car exited and reservation completed.',
-            'data'    => new OwnerReservationResource($reserve),
+            'data' => new OwnerReservationResource($reserve),
         ]);
     }
 
@@ -242,18 +317,34 @@ class OwnerReservationController extends Controller
     {
         match ($filter) {
             'waiting' => $query->livePending(),
-            'active'  => $query->where('status', Reserve::STATUS_ACTIVE),
+            'active' => $query->where('status', Reserve::STATUS_ACTIVE),
             'history' => $query->whereIn('status', [
                 Reserve::STATUS_COMPLETED,
                 Reserve::STATUS_EXPIRED,
                 Reserve::STATUS_CANCELLED,
             ]),
-            'all'     => null,
-            default   => $query->where(function ($q) {
+            'live' => $query->where(function ($q) {
                 // 'live' = waiting (live START holds) + active
                 $q->livePending()
                     ->orWhere('status', Reserve::STATUS_ACTIVE);
             }),
+            // 'all' (default) — no status constraint.
+            default => null,
+        };
+    }
+
+    /**
+     * Human-readable status label for CSV export cells.
+     */
+    private function statusLabel(int $status): string
+    {
+        return match ($status) {
+            Reserve::STATUS_START => 'Waiting',
+            Reserve::STATUS_ACTIVE => 'Active',
+            Reserve::STATUS_COMPLETED => 'Completed',
+            Reserve::STATUS_EXPIRED => 'Expired',
+            Reserve::STATUS_CANCELLED => 'Cancelled',
+            default => 'Unknown',
         };
     }
 }

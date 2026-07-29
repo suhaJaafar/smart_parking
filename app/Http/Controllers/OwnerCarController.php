@@ -3,21 +3,29 @@
 namespace App\Http\Controllers;
 
 use App\Data\CarPlate;
+use App\Http\Controllers\Concerns\ResolvesDateRange;
+use App\Http\Requests\ParkHistoryRequest;
 use App\Http\Requests\StoreOwnerCarRequest;
 use App\Http\Requests\UpdateOwnerCarRequest;
 use App\Http\Resources\OwnerCarResource;
 use App\Http\Resources\OwnerHoldResource;
+use App\Http\Resources\ParkCarHistoryResource;
 use App\Models\Car;
 use App\Models\Park;
+use App\Models\Reserve;
 use App\Models\User;
 use App\Services\CarService;
 use App\Services\ReservationService;
+use App\Support\CsvExporter;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\Response as HttpResponse;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Space-owner facing CRUD for the cars physically parked inside the owner's
@@ -34,6 +42,8 @@ use Symfony\Component\HttpFoundation\Response as HttpResponse;
  */
 class OwnerCarController extends Controller
 {
+    use ResolvesDateRange;
+
     public function __construct(
         private readonly CarService $cars,
         private readonly ReservationService $reservations,
@@ -54,10 +64,10 @@ class OwnerCarController extends Controller
      */
     public function index(Request $request): AnonymousResourceCollection
     {
-        $owner    = $request->user();
-        $parkIds  = $this->ownedParkIds($owner);
+        $owner = $request->user();
+        $parkIds = $this->ownedParkIds($owner);
 
-        $parkId     = $request->query('park_id');
+        $parkId = $request->query('park_id');
         $onlyParkId = (is_string($parkId) && $parkIds->contains($parkId)) ? $parkId : null;
 
         $query = Car::query()
@@ -75,6 +85,109 @@ class OwnerCarController extends Controller
             ->additional([
                 'waiting' => OwnerHoldResource::collection($waiting),
             ]);
+    }
+
+    /**
+     * Historical parking sessions — cars that entered one of the owner's
+     * garages in the past and have since left (COMPLETED reservations).
+     *
+     * This is intentionally NOT the currently-parked list: it is the audit
+     * trail of who has used the garage over time, filterable by garage and
+     * date window, paginated for the dashboard.
+     */
+    public function history(ParkHistoryRequest $request): AnonymousResourceCollection
+    {
+        return ParkCarHistoryResource::collection(
+            $this->historyQuery($request)->paginate(20)
+        );
+    }
+
+    /**
+     * Stream the full historical parking sessions (COMPLETED reservations)
+     * matching the garage + date window as a CSV (Excel) download.
+     */
+    public function exportHistory(ParkHistoryRequest $request): StreamedResponse
+    {
+        $query = $this->historyQuery($request);
+
+        [$from, $to] = $this->dateBounds(
+            $request->validated('from'),
+            $request->validated('to'),
+        );
+
+        $headers = [
+            'Booking code', 'Plate', 'Model', 'Owner', 'Phone', 'Garage',
+            'Entered at', 'Exited at', 'Duration (min)',
+        ];
+
+        $rows = function () use ($query) {
+            foreach ($query->lazy() as $reserve) {
+                $car = $reserve->user?->cars?->first();
+
+                $durationMinutes = $reserve->created_at !== null && $reserve->updated_at !== null
+                    ? max(0, (int) round($reserve->created_at->diffInSeconds($reserve->updated_at, false) / 60))
+                    : null;
+
+                yield [
+                    $reserve->booking_code,
+                    $car ? trim("{$car->plate_prefix}-{$car->car_number}", '-') : null,
+                    $car?->model,
+                    $reserve->user?->name,
+                    $reserve->user?->phone_number,
+                    $reserve->park?->name,
+                    $reserve->created_at?->toDateTimeString(),
+                    $reserve->updated_at?->toDateTimeString(),
+                    $durationMinutes,
+                ];
+            }
+        };
+
+        return CsvExporter::stream(
+            $this->exportFilename('park-cars', $from, $to),
+            $headers,
+            $rows(),
+        );
+    }
+
+    /**
+     * Shared query for the historical parking sessions: COMPLETED
+     * reservations across the owner's garages, newest first, scoped by an
+     * optional single garage and an optional date window.
+     *
+     * @return Builder<Reserve>
+     */
+    private function historyQuery(ParkHistoryRequest $request): Builder
+    {
+        $owner = $request->user();
+        $parkIds = $this->ownedParkIds($owner);
+
+        $query = Reserve::query()
+            ->where('status', Reserve::STATUS_COMPLETED)
+            ->whereIn('park_id', $parkIds)
+            ->with([
+                'park:id,name',
+                'user:id,name,phone_number',
+                'user.cars' => fn ($q) => $q->latest(),
+            ])
+            ->latest('created_at');
+
+        $parkId = $request->validated('park_id');
+        if (is_string($parkId) && $parkIds->contains($parkId)) {
+            $query->where('park_id', $parkId);
+        }
+
+        [$from, $to] = $this->dateBounds(
+            $request->validated('from'),
+            $request->validated('to'),
+        );
+        if ($from !== null) {
+            $query->where('created_at', '>=', $from);
+        }
+        if ($to !== null) {
+            $query->where('created_at', '<=', $to);
+        }
+
+        return $query;
     }
 
     /**
@@ -99,7 +212,7 @@ class OwnerCarController extends Controller
     public function store(StoreOwnerCarRequest $request): JsonResponse
     {
         $owner = $request->user();
-        $data  = $request->validated();
+        $data = $request->validated();
 
         $park = $this->ownedParkOrFail($owner, $data['park_id']);
 
@@ -120,7 +233,7 @@ class OwnerCarController extends Controller
 
         return response()->json([
             'message' => 'Car added to the park.',
-            'data'    => new OwnerCarResource($car->load(['park:id,name', 'user:id,name,phone_number'])),
+            'data' => new OwnerCarResource($car->load(['park:id,name', 'user:id,name,phone_number'])),
         ], HttpResponse::HTTP_CREATED);
     }
 
@@ -136,7 +249,7 @@ class OwnerCarController extends Controller
 
         return response()->json([
             'message' => 'Car updated.',
-            'data'    => new OwnerCarResource($car->load(['park:id,name', 'user:id,name,phone_number'])),
+            'data' => new OwnerCarResource($car->load(['park:id,name', 'user:id,name,phone_number'])),
         ]);
     }
 
@@ -159,9 +272,9 @@ class OwnerCarController extends Controller
     /**
      * IDs of every park owned by the given user.
      *
-     * @return \Illuminate\Support\Collection<int, string>
+     * @return Collection<int, string>
      */
-    private function ownedParkIds(User $owner): \Illuminate\Support\Collection
+    private function ownedParkIds(User $owner): Collection
     {
         return $owner->ownedParks()->pluck('id');
     }
