@@ -116,11 +116,13 @@ class OwnerCarController extends Controller
         );
 
         $headers = [
+            'No.',
             'Booking code', 'Plate', 'Model', 'Owner', 'Phone', 'Garage',
             'Entered at', 'Exited at', 'Duration (min)',
         ];
 
         $rows = function () use ($query) {
+            $index = 1;
             foreach ($query->lazy() as $reserve) {
                 $car = $reserve->user?->cars?->first();
 
@@ -129,6 +131,7 @@ class OwnerCarController extends Controller
                     : null;
 
                 yield [
+                    $index++,
                     $reserve->booking_code,
                     $car ? trim("{$car->plate_prefix}-{$car->car_number}", '-') : null,
                     $car?->model,
