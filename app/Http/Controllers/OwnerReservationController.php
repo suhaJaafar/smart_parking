@@ -112,15 +112,18 @@ class OwnerReservationController extends Controller
         }
 
         $headers = [
+            'No.',
             'Booking code', 'Status', 'Type', 'Garage', 'Customer', 'Phone',
             'Plate', 'Model', 'Created at', 'Last update', 'Scheduled at',
         ];
 
         $rows = function () use ($query) {
+            $index = 1;
             foreach ($query->lazy() as $reserve) {
                 $car = $reserve->user?->cars?->first();
 
                 yield [
+                    $index++,
                     $reserve->booking_code,
                     $this->statusLabel((int) $reserve->status),
                     $reserve->is_pre_booking ? 'Pre-booking' : 'On-site',

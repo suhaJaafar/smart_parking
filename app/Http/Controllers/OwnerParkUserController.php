@@ -56,16 +56,19 @@ class OwnerParkUserController extends Controller
         );
 
         $headers = [
+            'No.',
             'Customer', 'Phone', 'Plate', 'Model', 'Total reservations',
             'Completed', 'Active', 'Waiting', 'Cancelled', 'Expired',
             'First reservation', 'Last reservation',
         ];
 
         $rows = function () use ($query) {
+            $index = 1;
             foreach ($query->lazy() as $user) {
                 $car = $user->cars->first();
 
                 yield [
+                    $index++,
                     $user->name,
                     $user->phone_number,
                     $car ? trim("{$car->plate_prefix}-{$car->car_number}", '-') : null,

@@ -116,11 +116,13 @@ class OwnerCarController extends Controller
         );
 
         $headers = [
+            'No.',
             'Booking code', 'Plate', 'Model', 'Owner', 'Phone', 'Garage',
-            'Entered at', 'Exited at', 'Duration (min)',
+            'Entered at', 'Exited at', 'Duration',
         ];
 
         $rows = function () use ($query) {
+            $index = 1;
             foreach ($query->lazy() as $reserve) {
                 $car = $reserve->user?->cars?->first();
 
@@ -129,6 +131,7 @@ class OwnerCarController extends Controller
                     : null;
 
                 yield [
+                    $index++,
                     $reserve->booking_code,
                     $car ? trim("{$car->plate_prefix}-{$car->car_number}", '-') : null,
                     $car?->model,
@@ -137,7 +140,7 @@ class OwnerCarController extends Controller
                     $reserve->park?->name,
                     $reserve->created_at?->toDateTimeString(),
                     $reserve->updated_at?->toDateTimeString(),
-                    $durationMinutes,
+                    $this->formatDurationMinutes($durationMinutes),
                 ];
             }
         };
@@ -188,6 +191,36 @@ class OwnerCarController extends Controller
         }
 
         return $query;
+    }
+
+    /**
+     * Keep CSV duration labels aligned with the dashboard table:
+     * "1h 23m", "45m", "2h", "3d 5h", "< 1 min".
+     */
+    private function formatDurationMinutes(?int $minutes): string
+    {
+        if ($minutes === null || $minutes < 0) {
+            return '-';
+        }
+
+        $total = (int) round($minutes);
+        if ($total < 1) {
+            return '< 1 min';
+        }
+
+        $days = intdiv($total, 60 * 24);
+        $hours = intdiv($total % (60 * 24), 60);
+        $mins = $total % 60;
+
+        if ($days > 0) {
+            return $hours > 0 ? "{$days}d {$hours}h" : "{$days}d";
+        }
+
+        if ($hours > 0) {
+            return $mins > 0 ? "{$hours}h {$mins}m" : "{$hours}h";
+        }
+
+        return "{$mins}m";
     }
 
     /**
