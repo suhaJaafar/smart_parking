@@ -8,6 +8,7 @@ use App\Bots\Dto\OutboundReply;
 use App\Bots\Flows\Concerns\CollectsPhoneNumber;
 use App\Bots\Support\DigitNormalizer;
 use App\Bots\Support\Prompt;
+use App\Exceptions\ActiveReservationElsewhere;
 use App\Models\Park;
 use App\Models\Reserve;
 use App\Queries\NearbyParksQuery;
@@ -289,13 +290,24 @@ class PreBookingFlow
                 preBooking: true,
                 scheduledAt: $scheduledAt,
             );
+        } catch (ActiveReservationElsewhere $e) {
+            $session->reset();
+
+            return OutboundReply::text(
+                "⚠️ *لديك حجز فعّال بالفعل*\n\n"
+                . "الموقف: *{$e->parkName()}*\n\n"
+                . ($e->isCarInside()
+                    ? "يجب إخراج سيارتك من ذلك الموقف أولاً قبل حجز مكان جديد."
+                    : "يجب إلغاء ذلك الحجز أولاً قبل حجز مكان جديد.\n"
+                        . "لإلغاء حجزك أرسل: *الغاء حجزي*")
+            );
         } catch (RuntimeException $e) {
             $session->reset();
-            return OutboundReply::text(
-                $e->getMessage() === 'PARK_FULL'
-                    ? " للأسف لم يعد هناك أماكن فارغة في هذا الموقف. حاول واحداً آخر."
-                    : "⚠️ تعذر الحجز. حاول مرة أخرى."
-            );
+            return OutboundReply::text(match ($e->getMessage()) {
+                'PARK_FULL'         => " للأسف لم يعد هناك أماكن فارغة في هذا الموقف. حاول واحداً آخر.",
+                'PARK_NOT_APPROVED' => "⚠️ هذا الموقف غير متاح للحجز حالياً. اختر موقفاً آخر.",
+                default             => "⚠️ تعذر الحجز. حاول مرة أخرى.",
+            });
         }
 
         // notify the park owner about the new pre-booking.

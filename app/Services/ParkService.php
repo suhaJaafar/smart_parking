@@ -24,6 +24,11 @@ class ParkService
     /**
      * Create a park and its location in one transaction.
      *
+     * The garage is created *pending*: it is invisible to drivers and its
+     * creator gains nothing until an admin clears it. The SPACE_OWNER role is
+     * deliberately NOT granted here — see {@see self::approve()}. Granting it
+     * on submission would hand out owner powers to anyone who filled a form.
+     *
      * @param  LocationData  $location  Validated location payload (lat/lng/country/state/...).
      * @param  ParkData      $park      Validated park payload (name/capacity/free_spaces).
      * @param  User          $owner     The user that will own this park.
@@ -45,17 +50,63 @@ class ParkService
             ];
             $locationRow->save();
 
-            $parkRow = Park::create([
+            return Park::create([
                 ...$park->toArray(),
-                'user_id'     => $owner->id,
-                'location_id' => $locationRow->id,
+                'user_id'         => $owner->id,
+                'location_id'     => $locationRow->id,
+                'approval_status' => Park::APPROVAL_PENDING,
             ])->refresh();
-
-            // Promote the creator to SPACE_OWNER (idempotent).
-            $role = Role::firstOrCreate(['role' => RoleTypes::SPACE_OWNER->value]);
-            $owner->roles()->syncWithoutDetaching([$role->id]);
-
-            return $parkRow;
         });
+    }
+
+    /**
+     * Clear a garage for business.
+     *
+     * This is the moment the owner role is earned, which is why it lives with
+     * the approval rather than the creation. Idempotent: approving an already
+     * approved garage is a no-op rather than an error, so a double-click in
+     * the dashboard cannot produce a second notification.
+     */
+    public function approve(Park $park, User $admin): Park
+    {
+        if ($park->isApproved()) {
+            return $park;
+        }
+
+        return DB::transaction(function () use ($park, $admin) {
+            $park->forceFill([
+                'approval_status'  => Park::APPROVAL_APPROVED,
+                'approved_by'      => $admin->id,
+                'approved_at'      => now(),
+                'rejection_reason' => null,
+            ])->save();
+
+            // syncWithoutDetaching, not sync: an approved owner who is also a
+            // driver keeps both hats. Elsewhere roles are exclusive, but a
+            // garage owner losing their customer role here would strand any
+            // reservation they hold as a driver.
+            $role = Role::firstOrCreate(['role' => RoleTypes::SPACE_OWNER->value]);
+            $park->owner?->roles()->syncWithoutDetaching([$role->id]);
+
+            return $park->refresh();
+        });
+    }
+
+    /**
+     * Refuse a garage, optionally saying why.
+     *
+     * No role is revoked: the owner may have other approved garages, and
+     * stripping the role here would lock them out of those.
+     */
+    public function reject(Park $park, User $admin, ?string $reason = null): Park
+    {
+        $park->forceFill([
+            'approval_status'  => Park::APPROVAL_REJECTED,
+            'approved_by'      => $admin->id,
+            'approved_at'      => now(),
+            'rejection_reason' => $reason,
+        ])->save();
+
+        return $park->refresh();
     }
 }

@@ -2,10 +2,17 @@
 
 namespace App\Http\Controllers;
 
+use App\Bots\Support\CarEntryNotifier;
+use App\Bots\Support\ReservationNotifier;
+use App\Data\CarPlate;
+use App\Enums\PaymentStatusTypes;
 use App\Http\Controllers\Concerns\ResolvesDateRange;
+use App\Http\Requests\AdmitReservationRequest;
 use App\Http\Requests\ParkHistoryRequest;
+use App\Http\Requests\StoreWalkInRequest;
 use App\Http\Resources\OwnerReservationResource;
 use App\Models\Car;
+use App\Models\Park;
 use App\Models\Reserve;
 use App\Models\User;
 use App\Services\CarService;
@@ -18,6 +25,8 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
+use RuntimeException;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Throwable;
 
@@ -51,6 +60,8 @@ class OwnerReservationController extends Controller
     public function __construct(
         private readonly ReservationService $reservations,
         private readonly CarService $cars,
+        private readonly CarEntryNotifier $entryNotifier,
+        private readonly ReservationNotifier $reservationNotifier,
     ) {}
 
     /**
@@ -283,10 +294,222 @@ class OwnerReservationController extends Controller
 
         $reserve = $reserve->fresh($this->responseRelations());
 
+        // Closing a stay used to notify nobody — the customer's car left and
+        // they heard nothing about it, or about what they still owe.
+        $this->reservationNotifier->notifyCustomerOfExit(
+            $reserve,
+            $park,
+            $reserve->payments()
+                ->where('status', PaymentStatusTypes::SUCCESS->value)
+                ->exists(),
+        );
+
         return response()->json([
             'message' => 'Car exited and reservation completed.',
             'data' => new OwnerReservationResource($reserve),
         ]);
+    }
+
+    /**
+     * Admit an arriving customer: park their car and activate the hold.
+     *
+     * The dashboard/Mini App counterpart to the owner's Telegram CarEntryFlow,
+     * and deliberately identical to it:
+     *   1) resolve the customer's car (or create it from a supplied plate)
+     *   2) CarService::enterPark — claims the physical slot atomically
+     *   3) ReservationService::markActive — START → ACTIVE, provisions payment
+     *   4) notify the customer with their pay link
+     *
+     * A customer with no car on file needs a plate, exactly as the bot's
+     * `plate` step asks for one.
+     */
+    public function admit(AdmitReservationRequest $request, string $id): JsonResponse
+    {
+        $reserve = $this->reserveForOwner($request->user(), $id);
+
+        if ($reserve->status !== Reserve::STATUS_START) {
+            throw ValidationException::withMessages([
+                'status' => 'Only a pending reservation can be admitted.',
+            ]);
+        }
+
+        $park = $reserve->park;
+        if (! $park) {
+            throw ValidationException::withMessages([
+                'park_id' => 'This reservation is no longer attached to a park.',
+            ]);
+        }
+
+        $customer = $reserve->user;
+        if (! $customer) {
+            throw ValidationException::withMessages([
+                'customer' => 'This reservation has no customer attached.',
+            ]);
+        }
+
+        $car = $this->resolveArrivingCar($request, $customer);
+
+        try {
+            $car = $this->cars->enterPark($car, $park->fresh(), alreadyFull: false);
+            $active = $this->reservations->markActive($customer, $park);
+        } catch (RuntimeException $e) {
+            // CarService signals domain refusals with plain runtime errors.
+            // Re-key them so the client can show a specific, actionable reason
+            // instead of a generic failure — the error key IS the code.
+            $reason = strtolower($e->getMessage());
+
+            $field = match (true) {
+                str_contains($reason, 'full')           => 'park_full',
+                str_contains($reason, 'another park')   => 'car_in_other_park',
+                default                                  => 'admit',
+            };
+
+            throw ValidationException::withMessages([
+                $field => $e->getMessage(),
+            ]);
+        } catch (Throwable $e) {
+            Log::error('Owner dashboard admit failed', [
+                'reserve_id' => $reserve->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            throw ValidationException::withMessages([
+                'admit' => 'Failed to admit the car. Please try again.',
+            ]);
+        }
+
+        // The car is parked but no hold flipped to ACTIVE — the reservation
+        // would silently stay in the waiting list. Surface it rather than
+        // reporting a success the data does not support.
+        if ($active === null) {
+            Log::error('Admit parked the car but activated no reservation', [
+                'reserve_id' => $reserve->id,
+                'user_id' => $customer->id,
+                'park_id' => $park->id,
+            ]);
+
+            throw ValidationException::withMessages([
+                'admit' => 'The car was parked but the reservation could not be activated.',
+            ]);
+        }
+
+        // Best-effort: the car is physically parked, so a notification failure
+        // must never undo the entry.
+        try {
+            $this->entryNotifier->notifyEntered($customer, $park, $car, true, $active);
+        } catch (Throwable $e) {
+            Log::warning('Admit notification failed', [
+                'reserve_id' => $reserve->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return response()->json([
+            'message' => 'Car admitted and reservation activated.',
+            'data' => new OwnerReservationResource(
+                ($active ?? $reserve)->fresh($this->responseRelations())
+            ),
+        ]);
+    }
+
+    /**
+     * The car to admit: the customer's most recent vehicle, or one resolved
+     * from the plate supplied by the owner.
+     */
+    private function resolveArrivingCar(
+        AdmitReservationRequest $request,
+        User $customer,
+    ): Car {
+        $prefix = $request->validated('plate_prefix');
+        $number = $request->validated('car_number');
+
+        if ($prefix !== null && $number !== null) {
+            return $this->cars->findOrCreateByPlate(
+                new CarPlate(prefix: $prefix, number: $number),
+                $customer,
+            );
+        }
+
+        $car = $customer->cars()->latest()->first();
+
+        if (! $car) {
+            throw ValidationException::withMessages([
+                'plate_prefix' => 'This customer has no car on file — enter the plate to admit them.',
+            ]);
+        }
+
+        return $car;
+    }
+
+    /**
+     * Register a walk-in: a car that turned up with no reservation.
+     *
+     * Deliberately different from {@see admit()}: there is no hold to activate
+     * and no customer waiting in the list, so the reservation is created
+     * directly as ACTIVE and **no notification is sent** — the driver is
+     * standing at the barrier, not waiting on their phone.
+     *
+     * The vehicle is attached to the owner's own account when the plate is
+     * unknown, exactly as the bot's car-entry flow does for unrecognised
+     * plates, so the stay still has a billable subject and shows up in history.
+     */
+    public function walkIn(StoreWalkInRequest $request): JsonResponse
+    {
+        $owner = $request->user();
+        $data = $request->validated();
+
+        $park = Park::query()
+            ->whereKey($data['park_id'])
+            ->whereIn('id', $this->ownedParkIds($owner))
+            ->first();
+
+        if (! $park) {
+            throw ValidationException::withMessages([
+                'park_id' => 'Selected park is not one of your garages.',
+            ]);
+        }
+
+        $car = $this->cars->findOrCreateByPlate(
+            new CarPlate(prefix: $data['plate_prefix'], number: $data['car_number']),
+            $owner,
+            $data['model'] ?? null,
+        );
+
+        // Whoever the plate belongs to is the paying party; for an unknown
+        // plate that is the owner themselves.
+        $customer = $car->user ?? $owner;
+
+        try {
+            $car = $this->cars->enterPark($car, $park->fresh(), alreadyFull: false);
+            $reserve = $this->reservations->createWalkIn($customer, $park);
+        } catch (RuntimeException $e) {
+            $reason = strtolower($e->getMessage());
+
+            throw ValidationException::withMessages([
+                match (true) {
+                    str_contains($reason, 'full')         => 'park_full',
+                    str_contains($reason, 'another park') => 'car_in_other_park',
+                    default                                => 'walk_in',
+                } => $e->getMessage(),
+            ]);
+        } catch (Throwable $e) {
+            Log::error('Walk-in entry failed', [
+                'park_id' => $park->id,
+                'plate' => "{$data['plate_prefix']}-{$data['car_number']}",
+                'error' => $e->getMessage(),
+            ]);
+
+            throw ValidationException::withMessages([
+                'walk_in' => 'Failed to register the car. Please try again.',
+            ]);
+        }
+
+        return response()->json([
+            'message' => 'Walk-in registered.',
+            'data' => new OwnerReservationResource(
+                $reserve->fresh($this->responseRelations())
+            ),
+        ], HttpResponse::HTTP_CREATED);
     }
 
     /**

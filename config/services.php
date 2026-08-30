@@ -54,6 +54,12 @@ return [
         // Override only if you run your own Bot API server (Telegram supports
         // self-hosted bots — the official endpoint is the default).
         'api_base_url'   => env('TELEGRAM_API_BASE_URL', 'https://api.telegram.org'),
+
+        // Public HTTPS URL of the Telegram Mini App (the Next.js `/miniapp`
+        // route). Telegram refuses to open a Mini App over plain HTTP, so in
+        // local development this must be a tunnel (ngrok / Cloudflare) rather
+        // than localhost. Consumed by `telegram:set-menu-button`.
+        'mini_app_url'   => env('TELEGRAM_MINI_APP_URL'),
     ],
 
     'qicard' => [

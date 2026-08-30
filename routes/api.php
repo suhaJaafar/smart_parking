@@ -3,9 +3,12 @@
 use App\Bots\Channels\Telegram\TelegramController;
 use App\Bots\Channels\WhatsApp\WhatsAppController;
 use App\Http\Controllers\AdminController;
+use App\Http\Controllers\AdminParkApprovalController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\CoOwnerRequestController;
 use App\Http\Controllers\CustomerController;
+use App\Http\Controllers\CustomerReservationController;
+use App\Http\Controllers\MiniAppProfileController;
 use App\Http\Controllers\OwnerCarController;
 use App\Http\Controllers\OwnerController;
 use App\Http\Controllers\OwnerParkUserController;
@@ -24,11 +27,20 @@ Route::middleware('throttle:10,1')->group(function () {
     Route::post('auth/whatsapp/request-code', [AuthController::class, 'requestWhatsAppCode']);
     Route::post('auth/whatsapp/verify-code', [AuthController::class, 'verifyWhatsAppCode']);
     Route::post('auth/telegram/verify-code', [AuthController::class, 'verifyTelegramCode']);
+
+    // Telegram Mini App: exchange Telegram-signed `initData` for a JWT.
+    // Throttled like the other code endpoints — a forged payload costs an
+    // HMAC, so the limit blunts brute-force probing of the signature.
+    Route::post('auth/telegram/miniapp', [AuthController::class, 'verifyTelegramMiniApp']);
 });
 
 Route::middleware('auth:api')->group(function () {
     Route::get('user', [AuthController::class, 'user']);
     Route::post('logout', [AuthController::class, 'logout']);
+
+    // Mini App: switch between driver and garage owner. Roles are exclusive,
+    // mirroring the bot's onboarding.
+    Route::post('miniapp/role', [MiniAppProfileController::class, 'switchRole']);
 
     // users routes — privileged user management, SUPER_ADMIN only.
     Route::prefix('users')->group(function () {
@@ -60,6 +72,11 @@ Route::middleware('auth:api')->group(function () {
 
         // Platform-wide reservations analytics.
         Route::get('admin/reservation-stats', [ReservationStatsController::class, 'admin']);
+
+        // Review queue for newly registered garages.
+        Route::get('admin/park-approvals', [AdminParkApprovalController::class, 'index']);
+        Route::post('admin/park-approvals/{id}/approve', [AdminParkApprovalController::class, 'approve']);
+        Route::post('admin/park-approvals/{id}/reject', [AdminParkApprovalController::class, 'reject']);
     });
 
     // Space-owner routes — scoped to the authenticated user's own parks.
@@ -92,7 +109,9 @@ Route::middleware('auth:api')->group(function () {
         // `export` is registered before `{id}` so it isn't captured as an id.
         Route::get('owner/reservations', [OwnerReservationController::class, 'index']);
         Route::get('owner/reservations/export', [OwnerReservationController::class, 'export']);
+        Route::post('owner/walk-in', [OwnerReservationController::class, 'walkIn']);
         Route::get('owner/reservations/{id}', [OwnerReservationController::class, 'show']);
+        Route::post('owner/reservations/{id}/admit', [OwnerReservationController::class, 'admit']);
         Route::post('owner/reservations/{id}/cancel', [OwnerReservationController::class, 'cancel']);
         Route::post('owner/reservations/{id}/exit', [OwnerReservationController::class, 'exitCar']);
 
@@ -100,9 +119,21 @@ Route::middleware('auth:api')->group(function () {
         Route::get('owner/reservation-stats', [ReservationStatsController::class, 'owner']);
     });
 
-    // Customer-only routes
-    Route::middleware('role:USER')->group(function () {
+    // Customer-facing routes.
+    //
+    // Open to every signed-in role: web sign-ups get USER, bot/Mini App
+    // accounts get CUSTOMER, and a garage owner parks at other people's
+    // garages like anyone else. Every endpoint below is already scoped to the
+    // caller's own data, so the role is not what protects them.
+    Route::middleware('role:USER,CUSTOMER,SPACE_OWNER,ADMIN,SUPER_ADMIN')->group(function () {
         Route::get('customer/parks/nearby', [CustomerController::class, 'nearbyParks']);
+
+        // Reservations the customer makes for themselves.
+        Route::get('customer/reservations', [CustomerReservationController::class, 'index']);
+        Route::get('customer/reservations/active', [CustomerReservationController::class, 'active']);
+        Route::post('customer/reservations', [CustomerReservationController::class, 'store']);
+        Route::post('customer/reservations/{id}/cancel', [CustomerReservationController::class, 'cancel']);
+        Route::post('customer/reservations/{id}/pay-cash', [CustomerReservationController::class, 'payCash']);
     });
 });
 

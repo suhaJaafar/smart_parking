@@ -163,7 +163,7 @@ class PaymentService
                      . "🅿️ الموقف: {$park->name}\n"
                      . "💰 المبلغ: {$amount}\n\n"
                      . "🧾 لتحميل وصل الدفع اضغط هنا 👇\n\n"
-                     . "شكراً لاستخدامك Smart Parking.";
+                     . "شكراً لاستخدامك خدمة Smart Parking";
                 $this->notifier->notify(
                     $customer,
                     OutboundReply::ctaUrl($msg, '🧾 تحميل وصل الدفع', $receiptUrl)

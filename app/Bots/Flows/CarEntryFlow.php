@@ -5,6 +5,7 @@ namespace App\Bots\Flows;
 use App\Bots\Contracts\BotNotifier;
 use App\Bots\Contracts\BotSession;
 use App\Bots\Dto\OutboundReply;
+use App\Bots\Support\CarEntryNotifier;
 use App\Bots\Support\Prompt;
 use App\Data\CarPlate;
 use App\Enums\PaymentStatusTypes;
@@ -66,6 +67,7 @@ class CarEntryFlow
         private readonly CarService $carService,
         private readonly ReservationService $reservations,
         private readonly BotNotifier $notifier,
+        private readonly CarEntryNotifier $entryNotifier,
     ) {}
 
     public function handle(BotSession $session, string $message): OutboundReply
@@ -104,10 +106,24 @@ class CarEntryFlow
         }
 
         /** @var \Illuminate\Support\Collection<int, Park> $parks */
-        $parks = $owner->ownedParks()->orderBy('created_at')->get();
+        // Only cleared garages can take cars. Owning a park is not the same as
+        // being allowed to run it — admitting cars into a garage still under
+        // review would sidestep the whole approval step. Exits are
+        // deliberately NOT gated this way: a car already inside must always be
+        // releasable.
+        $parks = $owner->ownedParks()->approved()->orderBy('created_at')->get();
 
         if ($parks->isEmpty()) {
-            return OutboundReply::text("🚫 لا يوجد موقف مسجل باسمك. أنشئ موقفاً أولاً.");
+            $pending = $owner->ownedParks()
+                ->where('approval_status', Park::APPROVAL_PENDING)
+                ->exists();
+
+            return OutboundReply::text(
+                $pending
+                    ? "⏳ موقفك لا يزال قيد المراجعة.\n"
+                        . "سيصلك إشعار فور الموافقة، وعندها يمكنك إدخال السيارات."
+                    : "🚫 لا يوجد موقف مسجل باسمك. أنشئ موقفاً أولاً."
+            );
         }
 
         // A single park needs no disambiguation — go straight to its cars.
@@ -463,31 +479,13 @@ class CarEntryFlow
         bool $fulfilledReservation,
         ?Reserve $reserve = null,
     ): void {
-        $headline = $fulfilledReservation
-            ? "✅ تم تأكيد حجزك! دخلت سيارتك إلى الموقف."
-            : "✅ تم تسجيل دخول سيارتك إلى الموقف.";
-
-        $body = $headline . "\n\n"
-              . "📍 الموقف: {$park->name}\n"
-              . "🚗 اللوحة: {$car->plate_prefix}-{$car->car_number}\n"
-              . "🕒 وقت الدخول: " . now()->setTimezone(config('app.timezone'))->format('Y-m-d h:i A');
-
-        if ($reserve) {
-            $payment = $reserve->payments()
-                ->whereIn('status', [
-                    PaymentStatusTypes::CREATED->value,
-                    PaymentStatusTypes::SUCCESS->value,
-                ])
-                ->latest()
-                ->first();
-
-            if ($payment && !$payment->isPaid()) {
-                $url = route('payments.redirect', $payment->token);
-                $body .= "\n\n💳 لإتمام عملية الدفع إلكترونياً: [اضغط هنا]({$url})\n\nأو يمكنك الدفع نقداً عند الخروج.";
-            }
-        }
-
-        $this->notifier->notify($carOwner, OutboundReply::text($body));
+        $this->entryNotifier->notifyEntered(
+            $carOwner,
+            $park,
+            $car,
+            $fulfilledReservation,
+            $reserve,
+        );
     }
 
     private function merge(BotSession $session, array $patch, string $nextStep): void

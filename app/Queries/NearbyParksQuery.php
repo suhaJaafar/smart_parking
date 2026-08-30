@@ -47,6 +47,8 @@ class NearbyParksQuery
             ->join('locations', 'locations.id', '=', 'parks.location_id')
             ->whereRaw("ST_DWithin(locations.coordinates, {$point}, ?)", [$radiusMeters])
             ->where('parks.free_spaces', '>', 0)
+            // A garage awaiting review is not open for business.
+            ->approved()
             ->orderBy('distance_meters')
             ->limit($limit)
             ->with('location')

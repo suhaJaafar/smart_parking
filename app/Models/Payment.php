@@ -29,6 +29,7 @@ class Payment extends Model
 
     protected $fillable = [
         'status',
+        'method',
         'qi_status',
         'reserve_id',
         'user_id',
@@ -53,6 +54,12 @@ class Payment extends Model
     public function isPaid(): bool
     {
         return $this->status === PaymentStatusTypes::SUCCESS;
+    }
+
+    /** Customer intends to hand cash to the owner rather than pay online. */
+    public function isCash(): bool
+    {
+        return $this->method === 'cash';
     }
 
     public function isPending(): bool

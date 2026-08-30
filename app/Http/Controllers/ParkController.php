@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Bots\Support\ParkApprovalNotifier;
 use App\Http\Requests\ParkRequest;
 use App\Http\Requests\StoreParkRequest;
 use App\Http\Resources\ParkResource;
@@ -25,6 +26,7 @@ class ParkController extends Controller
 
     public function __construct(
         private readonly ParkService $parkService,
+        private readonly ParkApprovalNotifier $approvalNotifier,
     ) {}
 
     /**
@@ -53,10 +55,13 @@ class ParkController extends Controller
     /**
      * Create a park together with its location, automatically.
      *
+     * The garage is created pending review — see {@see ParkService::approve()}
+     * for where it goes live and where the SPACE_OWNER role is granted.
+     *
      * Owner resolution:
      *  - If the request carries a validated `user_id` (only possible when the
      *    actor is SUPER_ADMIN — see StoreParkRequest), that user becomes the
-     *    owner. The ParkService will also promote them to SPACE_OWNER.
+     *    owner.
      *  - Otherwise the park is owned by the authenticated user.
      */
     public function store(StoreParkRequest $request): JsonResponse
@@ -71,6 +76,8 @@ class ParkController extends Controller
             park:     $request->parkData(),
             owner:    $owner,
         );
+
+        $this->approvalNotifier->notifyOwnerOfSubmission($park);
 
         return (new ParkResource($park->load(self::PARK_WITH)))
             ->response()

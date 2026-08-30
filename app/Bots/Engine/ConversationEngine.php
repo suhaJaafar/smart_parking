@@ -833,8 +833,14 @@ class ConversationEngine
             $park = $parks->first();
             $body = $this->parkInfo($park, withIndex: null, withMapUrl: false);
 
+            $header = $park->isApproved()
+                ? "📍 *موقفك المسجّل:*\n\n"
+                : ($park->isPendingApproval()
+                    ? "⏳ *موقفك قيد المراجعة*\n_سيصلك إشعار فور الموافقة، وعندها يظهر للسائقين._\n\n"
+                    : "❌ *لم تتم الموافقة على موقفك*\n\n");
+
             return OutboundReply::ctaUrl(
-                body:    "📍 *موقفك المسجّل:*\n\n" . $body,
+                body:    $header . $body,
                 ctaText: '🗺️ عرض الموقع',
                 url:     "https://www.google.com/maps?q={$park->location?->latitude},{$park->location?->longitude}",
             );
@@ -846,10 +852,16 @@ class ConversationEngine
         $options  = [];
         foreach ($parks as $park) {
             $price     = number_format((float) $park->price, 0) . ' ' . $currency;
+            // A garage under review takes no bookings, so its free-space count
+            // would be a misleading thing to lead with.
             $options[] = [
                 'id'          => self::MY_PARK_DETAIL_PREFIX . $park->id,
-                'title'       => "📍 {$park->name}",
-                'description' => "متاح: {$park->free_spaces}/{$park->capacity} • 💰 {$price}",
+                'title'       => ($park->isApproved() ? '📍' : '⏳') . " {$park->name}",
+                'description' => $park->isApproved()
+                    ? "متاح: {$park->free_spaces}/{$park->capacity} • 💰 {$price}"
+                    : ($park->isPendingApproval()
+                        ? "قيد المراجعة • السعة {$park->capacity}"
+                        : "لم تتم الموافقة • السعة {$park->capacity}"),
             ];
         }
 
