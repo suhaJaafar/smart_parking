@@ -7,11 +7,13 @@ use App\Http\Requests\LoginRequest;
 use App\Http\Requests\RegisterRequest;
 use App\Http\Requests\WhatsAppRequestCodeRequest;
 use App\Http\Requests\WhatsAppVerifyCodeRequest;
+use App\Http\Requests\TelegramMiniAppAuthRequest;
 use App\Http\Requests\TelegramVerifyCodeRequest;
 use App\Http\Resources\RegisterResource;
 use App\Models\Role;
 use App\Models\User;
 use App\Bots\Channels\Telegram\TelegramLoginService;
+use App\Bots\Channels\Telegram\TelegramMiniAppAuthenticator;
 use App\Bots\Channels\WhatsApp\WhatsAppNotifier;
 use App\Bots\Channels\WhatsApp\WhatsAppOtpService;
 use Illuminate\Support\Facades\Hash;
@@ -170,6 +172,38 @@ class AuthController extends Controller
 
         if (!$user) {
             return response()->json(['error' => 'Invalid or expired code.'], 401);
+        }
+
+        $token = JWTAuth::fromUser($user);
+
+        return response()->json([
+            'message' => 'Login successful',
+            'token'   => $token,
+            'user'    => new RegisterResource($user->load('roles')),
+        ]);
+    }
+
+    /**
+     * Telegram Mini App sign-in — exchange signed `initData` for a JWT.
+     *
+     * There is no code and no password: Telegram signs the launch payload with
+     * our bot token, so a valid HMAC *is* the proof of identity. Every role may
+     * sign in here (unlike the dashboard code flow, which is owner-only) —
+     * the Mini App renders a customer or owner home from the roles it gets back.
+     *
+     * The error is intentionally generic and identical for a forged signature,
+     * a stale payload, and an unresolvable user, so probing reveals nothing.
+     */
+    public function verifyTelegramMiniApp(
+        TelegramMiniAppAuthRequest $request,
+        TelegramMiniAppAuthenticator $miniApp,
+    ) {
+        $payload = $miniApp->verify((string) $request->input('init_data'));
+
+        $user = $payload ? $miniApp->resolveOrCreateUser($payload) : null;
+
+        if (!$user) {
+            return response()->json(['error' => 'Invalid Telegram session.'], 401);
         }
 
         $token = JWTAuth::fromUser($user);

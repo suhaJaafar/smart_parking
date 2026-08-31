@@ -52,6 +52,8 @@ class StoreParkRequest extends FormRequest
             'name'          => ['required', 'string', 'max:255'],
             'capacity'      => ['required', 'integer', 'min:1'],
             'free_spaces'   => ['nullable', 'integer', 'min:0', 'lte:capacity'],
+            // Flat per-stay fee. Omitted → ParkData::DEFAULT_PRICE.
+            'price'         => ['nullable', 'numeric', 'min:0', 'max:1000000'],
 
             // Optional owner override (SUPER_ADMIN only).
             'user_id'       => ['sometimes', 'uuid', Rule::exists('users', 'id')],
@@ -95,7 +97,7 @@ class StoreParkRequest extends FormRequest
     public function parkData(): ParkData
     {
         return ParkData::fromArray($this->safe()->only([
-            'name', 'capacity', 'free_spaces',
+            'name', 'capacity', 'free_spaces', 'price',
         ]));
     }
 

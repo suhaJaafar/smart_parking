@@ -62,6 +62,7 @@ class OwnerReservationResource extends JsonResource
             'updated_at'     => $this->updated_at?->toIso8601String(),
             // Which actions the dashboard row should offer. Derived here so
             // the UI never has to re-encode the domain rules.
+            'can_admit'      => $status === Reserve::STATUS_START,
             'can_cancel'     => $status === Reserve::STATUS_START,
             'can_exit_car'   => $status === Reserve::STATUS_ACTIVE,
         ];

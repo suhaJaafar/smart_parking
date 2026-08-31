@@ -163,7 +163,12 @@ class ParkCreationFlow
         } catch (Throwable $e) {
             Log::error('Bot park create failed', ['error' => $e->getMessage()]);
             $session->reset();
-            return OutboundReply::text("❌ فشل إنشاء الموقف: {$e->getMessage()}");
+
+            // The reason stays in the log: raw exception text can carry SQL and
+            // internal paths, and none of it helps the person in the chat.
+            return OutboundReply::text(
+                "❌ تعذّر تسجيل الموقف. حاول مرة أخرى، وإن تكررت المشكلة تواصل مع الإدارة."
+            );
         }
 
         $session->reset();
@@ -171,13 +176,14 @@ class ParkCreationFlow
         $cityLine = $city ? "المدينة: {$city}\n" : '';
         $priceLine = 'السعر: ' . number_format((float) $park->price, 0)
                    . ' ' . config('services.qicard.currency') . "\n";
-        $body = "✅ تم إنشاء الموقف!\n"
+        $body = "📝 تم استلام طلب تسجيل موقفك!\n"
               . "الاسم: {$park->name}\n"
               . "السعة: {$park->capacity}\n"
               . $priceLine
               . $cityLine
               . "\n"
-              . "أرسل *موقفي* لعرض جميع مواقفك، أو *القائمة* للقائمة الرئيسية.";
+              . "طلبك الآن قيد المراجعة من قبل الإدارة، وسيتم الرد خلال 24 ساعة.\n"
+              . "سنرسل لك إشعاراً فور الموافقة، وعندها يظهر موقفك للسائقين.";
 
         return OutboundReply::ctaUrl(
             body:    $body,

@@ -20,6 +20,15 @@ class ParkResource extends JsonResource
             'user_id'     => $this->user_id,
             'capacity'    => $this->capacity,
             'free_spaces' => $this->free_spaces,
+            'price'       => $this->price,
+
+            // Review state. `is_approved` is derived here so no client has to
+            // re-encode which string counts as live.
+            'approval_status'   => $this->approval_status,
+            'is_approved'       => $this->resource->isApproved(),
+            'approved_at'       => $this->approved_at?->toIso8601String(),
+            'rejection_reason'  => $this->rejection_reason,
+
             'location'    => new LocationResource($this->whenLoaded('location')),
             'owner'       => $this->whenLoaded('owner', fn () => [
                 'id'    => $this->owner?->id,

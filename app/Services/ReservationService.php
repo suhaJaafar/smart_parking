@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Bots\Contracts\BotNotifier;
 use App\Bots\Dto\OutboundReply;
 use App\Enums\PaymentStatusTypes;
+use App\Exceptions\ActiveReservationElsewhere;
 use App\Models\Car;
 use App\Models\Park;
 use App\Models\Reserve;
@@ -105,6 +106,12 @@ class ReservationService
             // Lock the park row to serialize the availability check below.
             $locked = Park::whereKey($park->id)->lockForUpdate()->firstOrFail();
 
+            // Nearby search already hides unapproved garages, but a park_id
+            // can be posted directly, so the rule is enforced here too.
+            if (! $locked->isApproved()) {
+                throw new RuntimeException('PARK_NOT_APPROVED');
+            }
+
             // Prevent stacking holds on the same park. An ACTIVE row means
             // the customer's car is already inside — also a duplicate. Checked
             // first so a repeat tap idempotently returns the same hold instead
@@ -127,6 +134,25 @@ class ReservationService
 
             if ($existing) {
                 return $existing;
+            }
+
+            // A driver can only occupy one space at a time. If they are still
+            // tied to a different garage — waiting to enter it, or physically
+            // inside it — refuse now rather than letting them find out on
+            // arrival. Checked after the same-park dedupe above so a repeat tap
+            // on the *same* park stays idempotent.
+            $elsewhere = Reserve::where('user_id', $user->id)
+                ->where('park_id', '!=', $locked->id)
+                ->where(function ($q) {
+                    $q->livePending()
+                        ->orWhere('status', Reserve::STATUS_ACTIVE);
+                })
+                ->with('park')
+                ->latest('created_at')
+                ->first();
+
+            if ($elsewhere) {
+                throw new ActiveReservationElsewhere($elsewhere, $elsewhere->park);
             }
 
             // Any leftover stale START rows for this (user, park) pair are
@@ -180,8 +206,52 @@ class ReservationService
     }
 
     /**
-     * Find the customer's pending hold (status = START) at $park, if any.
+     * Record a walk-in: a car that arrives with no prior reservation.
      *
+     * Skips the whole hold lifecycle — the driver is already at the barrier,
+     * so there is nothing to "wait" for. The row is written straight to ACTIVE
+     * and a payment is provisioned exactly as it would be for an admitted
+     * reservation, so billing and history stay uniform.
+     *
+     * @throws RuntimeException if the park has no room.
+     */
+    public function createWalkIn(User $customer, Park $park): Reserve
+    {
+        $reserve = DB::transaction(function () use ($customer, $park) {
+            $locked = Park::whereKey($park->id)->lockForUpdate()->firstOrFail();
+
+            // free_spaces reflects cars physically inside; a walk-in takes one
+            // immediately, so refuse when the garage is already full.
+            if ($locked->free_spaces < 1) {
+                throw new RuntimeException('PARK_FULL');
+            }
+
+            return Reserve::create([
+                'user_id'        => $customer->id,
+                'park_id'        => $locked->id,
+                'status'         => Reserve::STATUS_ACTIVE,
+                'booking_code'   => Reserve::generateBookingCodeForPark($locked->id),
+                'is_pre_booking' => false,
+                'expires_at'     => null,
+            ]);
+        });
+
+        try {
+            $this->payments->ensureForReserve($reserve);
+        } catch (Throwable $e) {
+            // The car is already in the space; a billing hiccup must not undo
+            // the entry. Mirrors markActive().
+            Log::error('ensureForReserve failed after walk-in', [
+                'reserve_id' => $reserve->id,
+                'error'      => $e->getMessage(),
+            ]);
+        }
+
+        return $reserve->fresh();
+    }
+
+    /**
+     * Find the customer's pending hold (status = START) at $park, if any.     *
      * Used by the owner's car-entry flow to detect that the slot was already
      * debited at reservation time and must not be debited a second time.
      */
